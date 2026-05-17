@@ -140,6 +140,12 @@ responses_url = "https://console.x.ai/v1/responses"
 cluster = "https://us-east-1.api.x.ai"
 # 可选：填入 team id 后会生成 console chat-playground referer；留空使用 console 根路径
 team_id = ""
+# 可选：console.x.ai 专用 Cloudflare Cookie / UA。留空时仍只使用账号 SSO。
+# 注意：console.x.ai 与 grok.com 的 cf_clearance 通常不能互用。
+cf_cookies = ""
+cf_clearance = ""
+user_agent = ""
+browser = ""
 # basic console 旁路默认启用 web_search / x_search；客户端显式传 tools 时优先使用客户端参数
 enable_search_tools = true
 
