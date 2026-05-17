@@ -16,6 +16,15 @@ MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("grok-4.20-0309-non-reasoning",           ModeId.FAST,     Tier.BASIC, Capability.CHAT,       True, "Grok 4.20 0309 Non-Reasoning"),
     ModelSpec("grok-4.20-0309",                         ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309"),
     ModelSpec("grok-4.20-0309-reasoning",               ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning"),
+    # Console-only aliases for Basic accounts; upstream names are mapped in app.products.openai.console.
+    ModelSpec("grok-4.20-0309-reasoning-console",       ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning Console"),
+    ModelSpec("grok-4.20-reasoning-console",            ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 Reasoning Console"),
+    ModelSpec("grok-4.20-expert-console",               ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 Expert Console"),
+    ModelSpec("grok-4.3-console",                       ModeId.GROK_4_3, Tier.SUPER, Capability.CHAT,       True, "Grok 4.3 Console"),
+    ModelSpec("grok-4.3-beta-console",                  ModeId.GROK_4_3, Tier.SUPER, Capability.CHAT,       True, "Grok 4.3 Beta Console"),
+    ModelSpec("grok-4.20-multi-agent-console",          ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 Multi-Agent Console"),
+    ModelSpec("grok-4.20-heavy-console",                ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 Heavy Console"),
+    ModelSpec("grok-4.20-multi-agent-0309-console",     ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 Multi-Agent 0309 Console"),
     # Super+
     ModelSpec("grok-4.20-0309-non-reasoning-super",     ModeId.FAST,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Non-Reasoning Super"),
     ModelSpec("grok-4.20-0309-super",                   ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Super"),
