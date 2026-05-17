@@ -28,6 +28,7 @@ from ._format import (
 
 _BASIC_POOL_ID = 0
 _BASIC_FEEDBACK_MODE = int(ModeId.FAST)
+_SYNTHETIC_REASONING_TEXT = "已深度思考。"
 _DEFAULT_CONSOLE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
@@ -375,6 +376,21 @@ def extract_response_reasoning(obj: dict) -> str:
     return "".join(texts)
 
 
+def _response_has_reasoning(obj: dict) -> bool:
+    wrapped = obj.get("response")
+    if isinstance(wrapped, dict) and _response_has_reasoning(wrapped):
+        return True
+    for item in obj.get("output", []) or []:
+        if isinstance(item, dict) and item.get("type") == "reasoning":
+            return True
+    return False
+
+
+def _event_has_reasoning_item(obj: dict) -> bool:
+    item = obj.get("item")
+    return isinstance(item, dict) and item.get("type") == "reasoning"
+
+
 def _append_content_texts(content: Any, texts: list[str]) -> None:
     if isinstance(content, dict):
         text = content.get("text")
@@ -645,6 +661,8 @@ async def maybe_create_chat_completion(
         assert isinstance(result, dict)
         text = extract_response_text(result)
         reasoning = extract_response_reasoning(result) if emit_think else ""
+        if emit_think and not reasoning and _response_has_reasoning(result):
+            reasoning = _SYNTHETIC_REASONING_TEXT
         usage = result.get("usage")
         chat_usage = None
         if isinstance(usage, dict):
@@ -667,6 +685,7 @@ async def maybe_create_chat_completion(
         done = False
         emitted_text = ""
         emitted_reasoning = ""
+        synthetic_reasoning_sent = False
         async for raw in result:
             for line in _coerce_sse_line(raw).splitlines():
                 if not line.startswith("data:"):
@@ -687,6 +706,14 @@ async def maybe_create_chat_completion(
                 if not isinstance(obj, dict):
                     continue
                 event_type = obj.get("type")
+                if (
+                    emit_think
+                    and not synthetic_reasoning_sent
+                    and _event_has_reasoning_item(obj)
+                ):
+                    emitted_reasoning += _SYNTHETIC_REASONING_TEXT
+                    yield f"data: {orjson.dumps(make_thinking_chunk(response_id, model, _SYNTHETIC_REASONING_TEXT)).decode()}\n\n"
+                    synthetic_reasoning_sent = True
                 text, text_is_full = _extract_event_text(obj)
                 if text:
                     delta = _delta_from_full(text, emitted_text) if text_is_full else text
