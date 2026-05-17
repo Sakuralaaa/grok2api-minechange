@@ -128,15 +128,6 @@
       letter-spacing:-.02em;
       margin-top:auto;
     }
-    .stat-subline {
-      display:flex;
-      gap:6px;
-      flex-wrap:wrap;
-      color:#8f8f8f;
-      font-size:11px;
-      font-variant-numeric:tabular-nums;
-      line-height:1.2;
-    }
     .stat-muted { color:#a1a1aa !important; }
     [data-random-only] { display:none }
     .stat-grid.mode-random [data-random-only] { display:flex }
@@ -146,9 +137,8 @@
     .stat-grid.mode-random [data-stat-card="disabled"] { order:4 }
     .stat-grid.mode-random [data-stat-card="total"] { order:5 }
     .stat-grid.mode-random [data-stat-card="calls"] { order:6 }
-    .stat-grid.mode-random [data-stat-card="console"] { order:7 }
-    .stat-grid.mode-random [data-stat-card="success"] { order:8 }
-    .stat-grid.mode-random [data-stat-card="rate"] { order:9 }
+    .stat-grid.mode-random [data-stat-card="success"] { order:7 }
+    .stat-grid.mode-random [data-stat-card="rate"] { order:8 }
 
     /* Filters */
     .filter-bar {
@@ -807,16 +797,6 @@
       </div>
       <div class="stat-num" id="s-calls" style="color:#111">0</div>
     </div>
-    <div class="stat-cell" data-stat-card="console">
-      <div class="stat-top">
-        <div class="stat-label">Console</div>
-        <span class="stat-icon" style="color:#0f766e">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 7h16"/><path d="M7 12h10"/><path d="M10 17h4"/></svg>
-        </span>
-      </div>
-      <div class="stat-num" id="s-console" style="color:#0f766e">0</div>
-      <div class="stat-subline" id="s-console-breakdown">R:0 4.3:0 M:0</div>
-    </div>
     <div class="stat-cell" data-stat-card="success" data-random-only>
       <div class="stat-top">
         <div class="stat-label" data-i18n="account.statSuccessTotal">成功总数</div>
@@ -1000,7 +980,6 @@
               <span class="q-pill q-f">F</span>
               <span class="q-pill q-e">E</span>
               <span class="q-pill q-h">H</span>
-              <span class="q-pill q-c">C</span>
             </span>
           </th>
           <th class="table-center">Console</th>
@@ -1256,10 +1235,6 @@ function getTokenView() {
     qf: 0,
     qe: 0,
     qh: 0,
-    console: 0,
-    consoleReasoning: 0,
-    consoleGrok43: 0,
-    consoleMultiAgent: 0,
   };
   const statusCounts = { all: 0, active: 0, cooling: 0, invalid: 0, disabled: 0 };
   const nsfwCounts = { all: 0, enabled: 0, disabled: 0 };
@@ -1288,11 +1263,6 @@ function getTokenView() {
     stats.qf += quota.fast?.remaining || 0;
     stats.qe += quota.expert?.remaining || 0;
     stats.qh += quota.heavy?.remaining || 0;
-    const consoleUsage = consoleCounts(token.console_usage || {});
-    stats.consoleReasoning += consoleUsage.reasoning;
-    stats.consoleGrok43 += consoleUsage.grok43;
-    stats.consoleMultiAgent += consoleUsage.multiAgent;
-    stats.console += consoleUsage.total;
 
     if (token.status === 'active') stats.active += 1;
     if (token.status === 'cooling') stats.cooling += 1;
@@ -1358,8 +1328,6 @@ function renderStats(view = getTokenView()) {
   $('s-invalid', stats.invalid);
   $('s-disabled', stats.disabled);
   $('s-calls', fmt(stats.calls));
-  $('s-console', fmt(stats.console));
-  $('s-console-breakdown', `R:${fmt(stats.consoleReasoning)} 4.3:${fmt(stats.consoleGrok43)} M:${fmt(stats.consoleMultiAgent)}`);
   $('s-success', fmt(stats.success));
   $('s-rate', fmtRate(stats.success, stats.fail));
   $('s-qa', fmt(stats.qa)); $('s-qf', fmt(stats.qf)); $('s-qe', fmt(stats.qe)); $('s-qh', fmt(stats.qh));
@@ -1582,7 +1550,6 @@ function qpills(q) {
     ['fast',     'F', 'q-f', true],
     ['expert',   'E', 'q-e', true],
     ['heavy',    'H', 'q-h', true],
-    ['grok_4_3', 'B', 'q-b', false],
   ];
   return modes.map(([m,l,c,showEmpty]) => {
     const win = q[m];
