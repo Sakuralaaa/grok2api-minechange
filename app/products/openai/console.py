@@ -9,12 +9,6 @@ import orjson
 
 from app.control.account.enums import FeedbackKind
 from app.control.model.enums import ModeId
-from app.dataplane.proxy.adapters.headers import (
-    _client_hints,
-    build_http_headers,
-    build_sso_cookie,
-)
-from app.dataplane.proxy.adapters.profile import browser_from_user_agent
 from app.dataplane.proxy.adapters.session import ResettableSession, build_session_kwargs
 from app.platform.config.snapshot import get_config
 from app.platform.errors import RateLimitError, UpstreamError
@@ -34,6 +28,11 @@ from ._format import (
 
 _BASIC_POOL_ID = 0
 _BASIC_FEEDBACK_MODE = int(ModeId.FAST)
+_DEFAULT_CONSOLE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
+)
+_DEFAULT_CONSOLE_BROWSER = "edge"
 
 _CONSOLE_MODEL_MAP: dict[str, str] = {
     "grok-4.20-0309-reasoning": "grok-4.20-0309-reasoning",
@@ -79,38 +78,22 @@ def _console_referer() -> str:
     return "https://console.x.ai/"
 
 
-def _console_cf_cookies() -> str:
-    return get_config().get_str("console.cf_cookies", "").strip()
-
-
-def _console_cf_clearance() -> str:
-    return get_config().get_str("console.cf_clearance", "").strip()
-
-
 def _console_user_agent() -> str:
-    return get_config().get_str("console.user_agent", "").strip()
+    return get_config().get_str(
+        "console.user_agent",
+        _DEFAULT_CONSOLE_USER_AGENT,
+    ).strip() or _DEFAULT_CONSOLE_USER_AGENT
 
 
 def _console_browser_override() -> str | None:
     browser = get_config().get_str("console.browser", "").strip()
-    if browser:
-        return browser
-    ua = _console_user_agent()
-    return browser_from_user_agent(ua) if ua else None
+    return browser or _DEFAULT_CONSOLE_BROWSER
 
 
-def _strip_cookie_names(cookie_header: str, names: set[str]) -> str:
-    if not cookie_header:
-        return ""
-    kept: list[str] = []
-    for part in cookie_header.split(";"):
-        item = part.strip()
-        if not item or "=" not in item:
-            continue
-        name = item.split("=", 1)[0].strip().lower()
-        if name not in names:
-            kept.append(item)
-    return "; ".join(kept)
+def _console_sso_cookie(token: str) -> str:
+    tok = token[4:] if token.startswith("sso=") else token
+    tok = "".join(str(tok).split())
+    return f"sso={tok}; sso-rw={tok}"
 
 
 def _build_console_payload(
@@ -149,33 +132,15 @@ def _build_console_payload(
     return orjson.dumps(payload)
 
 
-def _build_console_headers(token: str, lease) -> dict[str, str]:
-    headers = build_http_headers(
-        token,
-        content_type="application/json",
-        origin="https://console.x.ai",
-        referer=_console_referer(),
-        lease=lease,
-    )
-    headers["Authorization"] = "Bearer anonymous"
-    headers["X-Cluster"] = _console_cluster()
-    console_cookies = _strip_cookie_names(_console_cf_cookies(), {"sso", "sso-rw"})
-    console_clearance = _console_cf_clearance()
-    if console_cookies or console_clearance:
-        headers["Cookie"] = build_sso_cookie(
-            token,
-            lease=lease,
-            cf_cookies=console_cookies,
-            cf_clearance=console_clearance,
-        )
-    console_ua = _console_user_agent()
-    if console_ua:
-        headers["User-Agent"] = console_ua
-        for key in list(headers):
-            if key.lower().startswith("sec-ch-ua"):
-                headers.pop(key, None)
-        headers.update(_client_hints(_console_browser_override(), console_ua))
-    return headers
+def _build_console_headers(token: str, _lease) -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Cookie": _console_sso_cookie(token),
+        "Origin": "https://console.x.ai",
+        "User-Agent": _console_user_agent(),
+        "Authorization": "Bearer anonymous",
+        "X-Cluster": _console_cluster(),
+    }
 
 
 def _proxy_feedback_kind(status: int | None):
@@ -540,7 +505,10 @@ async def maybe_create_response(
                     nonlocal success, fail_exc
                     try:
                         async for raw_line in upstream_lines:
-                            yield _rewrite_response_sse_line(str(raw_line), model) + "\n"
+                            line = str(raw_line)
+                            if not line.strip():
+                                continue
+                            yield _rewrite_response_sse_line(line, model) + "\n\n"
                         success = True
                     except UpstreamError as exc:
                         fail_exc = exc
