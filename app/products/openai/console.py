@@ -300,6 +300,14 @@ def _rewrite_response_sse_line(line: str, model: str) -> str:
 
 def extract_response_text(obj: dict) -> str:
     texts: list[str] = []
+    direct = obj.get("output_text")
+    if direct:
+        texts.append(str(direct))
+    wrapped = obj.get("response")
+    if isinstance(wrapped, dict):
+        nested = extract_response_text(wrapped)
+        if nested:
+            texts.append(nested)
     for item in obj.get("output", []) or []:
         if not isinstance(item, dict):
             continue
@@ -311,6 +319,11 @@ def extract_response_text(obj: dict) -> str:
 
 def extract_response_reasoning(obj: dict) -> str:
     texts: list[str] = []
+    wrapped = obj.get("response")
+    if isinstance(wrapped, dict):
+        nested = extract_response_reasoning(wrapped)
+        if nested:
+            texts.append(nested)
     for item in obj.get("output", []) or []:
         if not isinstance(item, dict) or item.get("type") != "reasoning":
             continue
@@ -318,6 +331,86 @@ def extract_response_reasoning(obj: dict) -> str:
             if isinstance(part, dict) and part.get("text"):
                 texts.append(str(part["text"]))
     return "".join(texts)
+
+
+def _append_content_texts(content: Any, texts: list[str]) -> None:
+    if isinstance(content, dict):
+        text = content.get("text")
+        if text:
+            texts.append(str(text))
+        return
+    if not isinstance(content, list):
+        return
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text")
+        if text:
+            texts.append(str(text))
+
+
+def _extract_event_text(obj: dict) -> tuple[str, bool]:
+    """Return text carried by a console Responses stream event.
+
+    The console endpoint is not perfectly stable about whether text arrives as
+    output_text.delta events or only in done/completed payloads. The boolean is
+    True when the returned text is a full accumulated value rather than a delta.
+    """
+    event_type = obj.get("type")
+    if event_type == "response.output_text.delta":
+        return str(obj.get("delta") or ""), False
+    if event_type == "response.output_text.done":
+        return str(obj.get("text") or ""), True
+    if event_type == "response.content_part.done":
+        part = obj.get("part")
+        if isinstance(part, dict):
+            return str(part.get("text") or ""), True
+        return "", True
+    if event_type == "response.output_item.done":
+        item = obj.get("item")
+        if isinstance(item, dict):
+            texts: list[str] = []
+            _append_content_texts(item.get("content"), texts)
+            return "".join(texts), True
+        return "", True
+    if event_type == "response.completed":
+        response = obj.get("response")
+        if isinstance(response, dict):
+            return extract_response_text(response), True
+    return "", False
+
+
+def _extract_event_reasoning(obj: dict) -> tuple[str, bool]:
+    event_type = obj.get("type")
+    if event_type == "response.reasoning_summary_text.delta":
+        return str(obj.get("delta") or ""), False
+    if event_type == "response.reasoning_summary_text.done":
+        return str(obj.get("text") or ""), True
+    if event_type == "response.reasoning_summary_part.done":
+        part = obj.get("part")
+        if isinstance(part, dict):
+            return str(part.get("text") or ""), True
+    if event_type == "response.output_item.done":
+        item = obj.get("item")
+        if isinstance(item, dict) and item.get("type") == "reasoning":
+            texts: list[str] = []
+            _append_content_texts(item.get("summary"), texts)
+            return "".join(texts), True
+    if event_type == "response.completed":
+        response = obj.get("response")
+        if isinstance(response, dict):
+            return extract_response_reasoning(response), True
+    return "", False
+
+
+def _delta_from_full(full_text: str, emitted_text: str) -> str:
+    if not full_text:
+        return ""
+    if emitted_text and full_text.startswith(emitted_text):
+        return full_text[len(emitted_text):]
+    if full_text == emitted_text:
+        return ""
+    return full_text
 
 
 async def maybe_create_response(
@@ -527,6 +620,8 @@ async def maybe_create_chat_completion(
 
     async def _run_chat_stream() -> AsyncGenerator[str, None]:
         done = False
+        emitted_text = ""
+        emitted_reasoning = ""
         async for raw in result:
             for line in str(raw).splitlines():
                 if not line.startswith("data:"):
@@ -547,15 +642,23 @@ async def maybe_create_chat_completion(
                 if not isinstance(obj, dict):
                     continue
                 event_type = obj.get("type")
-                if event_type == "response.output_text.delta":
-                    delta = str(obj.get("delta") or "")
+                text, text_is_full = _extract_event_text(obj)
+                if text:
+                    delta = _delta_from_full(text, emitted_text) if text_is_full else text
                     if delta:
+                        emitted_text += delta
                         yield f"data: {orjson.dumps(make_stream_chunk(response_id, model, delta)).decode()}\n\n"
-                elif event_type == "response.reasoning_summary_text.delta" and emit_think:
-                    delta = str(obj.get("delta") or "")
+                reasoning, reasoning_is_full = _extract_event_reasoning(obj)
+                if reasoning and emit_think:
+                    delta = (
+                        _delta_from_full(reasoning, emitted_reasoning)
+                        if reasoning_is_full
+                        else reasoning
+                    )
                     if delta:
+                        emitted_reasoning += delta
                         yield f"data: {orjson.dumps(make_thinking_chunk(response_id, model, delta)).decode()}\n\n"
-                elif event_type == "response.completed" and not done:
+                if event_type == "response.completed" and not done:
                     yield f"data: {orjson.dumps(make_stream_chunk(response_id, model, '', is_final=True)).decode()}\n\n"
                     yield "data: [DONE]\n\n"
                     done = True
