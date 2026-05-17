@@ -25,6 +25,7 @@ from app.control.account.commands import (
     BulkReplacePoolCommand,
     ListAccountsQuery,
 )
+from app.control.account.console_usage import normalize_console_usage
 from app.control.account.enums import AccountStatus
 
 if TYPE_CHECKING:
@@ -106,9 +107,9 @@ class SaveTokensRequest(RootModel[dict[str, list[str | TokenImportItem]]]):
 # ---------------------------------------------------------------------------
 
 def _quota_brief(q: dict) -> dict:
-    """Extract {auto, fast, expert, heavy} with only remaining/total from stored quota dict."""
+    """Extract quota windows with only remaining/total from stored quota dict."""
     out = {}
-    for mode in ("auto", "fast", "expert", "heavy"):
+    for mode in ("auto", "fast", "expert", "heavy", "grok_4_3"):
         v = q.get(mode)
         if isinstance(v, dict):
             out[mode] = {
@@ -124,7 +125,9 @@ def _serialize_record(r) -> dict:
         "pool":        r.pool or "basic",
         "status":      r.status,
         "quota":       _quota_brief(r.quota) if isinstance(r.quota, dict) else {},
+        "console_usage": normalize_console_usage(r.ext if isinstance(r.ext, dict) else {}),
         "use_count":   r.usage_use_count or 0,
+        "fail_count":  r.usage_fail_count or 0,
         "last_used_at": r.last_use_at,
         "tags":        r.tags or [],
     }

@@ -8,18 +8,26 @@ from typing import Any, AsyncGenerator
 import orjson
 
 from app.control.account.enums import FeedbackKind
-from app.control.model.enums import ModeId
+from app.control.account.commands import AccountPatch
+from app.control.account.console_usage import (
+    EXT_KEY as CONSOLE_USAGE_EXT_KEY,
+    console_mode_id_for_model,
+    console_usage_key_for_model,
+    increment_console_usage,
+)
 from app.dataplane.proxy.adapters.session import ResettableSession, build_session_kwargs
 from app.platform.config.snapshot import get_config
 from app.platform.errors import RateLimitError, UpstreamError
 from app.platform.logging.logger import logger
-from app.platform.runtime.clock import now_s
+from app.platform.runtime.clock import now_ms, now_s
 from app.platform.tokens import estimate_prompt_tokens, estimate_tokens
 from app.products._account_selection import selection_max_retries
 
 from ._format import (
     build_usage,
+    format_sse,
     make_chat_response,
+    make_resp_id,
     make_response_id,
     make_stream_chunk,
     make_thinking_chunk,
@@ -27,7 +35,6 @@ from ._format import (
 
 
 _BASIC_POOL_ID = 0
-_BASIC_FEEDBACK_MODE = int(ModeId.FAST)
 _SYNTHETIC_REASONING_TEXT = "已深度思考。"
 _DEFAULT_CONSOLE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -57,6 +64,104 @@ def is_console_basic_model(model: str) -> bool:
 
 def console_upstream_model(model: str) -> str:
     return _CONSOLE_MODEL_MAP.get(model, model)
+
+
+def _console_reasoning_include(include: list[str] | None, emit_think: bool) -> list[str] | None:
+    if not emit_think:
+        return include
+    values = list(include or [])
+    if "reasoning.encrypted_content" not in values:
+        values.append("reasoning.encrypted_content")
+    return values
+
+
+def _make_console_thinking_chunk(response_id: str, model: str, content: str) -> dict:
+    chunk = make_thinking_chunk(response_id, model, content)
+    try:
+        delta = chunk["choices"][0]["delta"]
+    except Exception:
+        return chunk
+    # Keep reasoning_content for existing clients, and add common aliases for
+    # clients that only open their thinking UI on reasoning/thinking fields.
+    delta.setdefault("reasoning", content)
+    delta.setdefault("thinking", content)
+    return chunk
+
+
+def _make_console_chat_response(
+    model: str,
+    content: str,
+    *,
+    prompt_content: Any | None = None,
+    response_id: str | None = None,
+    usage: dict | None = None,
+    reasoning_content: str | None = None,
+) -> dict:
+    resp = make_chat_response(
+        model,
+        content,
+        prompt_content=prompt_content,
+        response_id=response_id,
+        usage=usage,
+        reasoning_content=reasoning_content,
+    )
+    if reasoning_content:
+        msg = resp["choices"][0]["message"]
+        msg.setdefault("reasoning", reasoning_content)
+        msg.setdefault("thinking", reasoning_content)
+    return resp
+
+
+def _synthetic_response_reasoning_item(reasoning_id: str, *, status: str = "completed") -> dict:
+    return {
+        "id": reasoning_id,
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": _SYNTHETIC_REASONING_TEXT}],
+        "status": status,
+    }
+
+
+def _synthetic_response_reasoning_events(reasoning_id: str) -> list[str]:
+    return [
+        format_sse("response.output_item.added", {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"id": reasoning_id, "type": "reasoning", "summary": [], "status": "in_progress"},
+        }),
+        format_sse("response.reasoning_summary_part.added", {
+            "type": "response.reasoning_summary_part.added",
+            "item_id": reasoning_id,
+            "output_index": 0,
+            "summary_index": 0,
+            "part": {"type": "summary_text", "text": ""},
+        }),
+        format_sse("response.reasoning_summary_text.delta", {
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": reasoning_id,
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": _SYNTHETIC_REASONING_TEXT,
+        }),
+        format_sse("response.reasoning_summary_text.done", {
+            "type": "response.reasoning_summary_text.done",
+            "item_id": reasoning_id,
+            "output_index": 0,
+            "summary_index": 0,
+            "text": _SYNTHETIC_REASONING_TEXT,
+        }),
+        format_sse("response.reasoning_summary_part.done", {
+            "type": "response.reasoning_summary_part.done",
+            "item_id": reasoning_id,
+            "output_index": 0,
+            "summary_index": 0,
+            "part": {"type": "summary_text", "text": _SYNTHETIC_REASONING_TEXT},
+        }),
+        format_sse("response.output_item.done", {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": _synthetic_response_reasoning_item(reasoning_id),
+        }),
+    ]
 
 
 def _default_console_tools() -> list[dict[str, Any]]:
@@ -305,21 +410,72 @@ async def _post_console_stream(
     return _lines()
 
 
-async def _reserve_basic_console_account(directory, *, exclude_tokens: list[str] | None):
+async def _reserve_basic_console_account(directory, model: str, *, exclude_tokens: list[str] | None):
     return await directory.reserve(
         pool_candidates=(_BASIC_POOL_ID,),
-        mode_id=_BASIC_FEEDBACK_MODE,
+        mode_id=console_mode_id_for_model(model),
         exclude_tokens=exclude_tokens,
         now_s_override=now_s(),
     )
 
 
-def _normalize_response_model(obj: dict, model: str) -> dict:
+async def _record_console_feedback(directory, token: str, model: str, kind: FeedbackKind) -> None:
+    repo = getattr(directory, "_repo", None)
+    if repo is None:
+        return
+    try:
+        records = await repo.get_accounts([token])
+        if not records:
+            return
+        record = records[0]
+        key = console_usage_key_for_model(model)
+        usage = increment_console_usage(
+            record.ext,
+            key,
+            success=kind == FeedbackKind.SUCCESS,
+        )
+        await repo.patch_accounts([
+            AccountPatch(
+                token=token,
+                ext_merge={CONSOLE_USAGE_EXT_KEY: usage},
+                usage_use_delta=1 if kind == FeedbackKind.SUCCESS else None,
+                usage_fail_delta=1 if kind != FeedbackKind.SUCCESS else None,
+                last_use_at=now_ms() if kind == FeedbackKind.SUCCESS else None,
+                last_fail_at=now_ms() if kind != FeedbackKind.SUCCESS else None,
+            )
+        ])
+    except Exception as exc:
+        logger.warning(
+            "console usage persistence failed: token={}... model={} error={}",
+            token[:8],
+            model,
+            exc,
+        )
+
+
+def _inject_synthetic_response_reasoning(obj: dict) -> None:
+    output = obj.get("output")
+    if not isinstance(output, list):
+        return
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        if not extract_response_reasoning({"output": [item]}):
+            item["summary"] = [{"type": "summary_text", "text": _SYNTHETIC_REASONING_TEXT}]
+        return
+    output.insert(0, _synthetic_response_reasoning_item(make_resp_id("rs")))
+
+
+def _normalize_response_model(obj: dict, model: str, *, emit_think: bool = False) -> dict:
     if isinstance(obj, dict):
         obj["model"] = model
+        if emit_think:
+            _inject_synthetic_response_reasoning(obj)
         response = obj.get("response")
         if isinstance(response, dict):
             response["model"] = model
+            if emit_think:
+                _inject_synthetic_response_reasoning(response)
     return obj
 
 
@@ -481,12 +637,14 @@ async def maybe_create_response(
     input_val: str | list[Any],
     instructions: str | None,
     stream: bool,
+    emit_think: bool,
     temperature: float,
     top_p: float,
     max_output_tokens: int | None = None,
     include: list[str] | None = None,
     tools: list[Any] | None = None,
     tool_choice: Any = None,
+    synthesize_response_reasoning: bool = True,
 ) -> dict | AsyncGenerator[str, None] | None:
     if not is_console_basic_model(model):
         return None
@@ -505,7 +663,7 @@ async def maybe_create_response(
         temperature=temperature,
         top_p=top_p,
         max_output_tokens=max_output_tokens,
-        include=include,
+        include=_console_reasoning_include(include, emit_think),
         tools=tools,
         tool_choice=tool_choice,
     )
@@ -515,7 +673,8 @@ async def maybe_create_response(
     excluded: list[str] = []
     last_exc: UpstreamError | None = None
     for attempt in range(max_retries + 1):
-        acct = await _reserve_basic_console_account(directory, exclude_tokens=excluded or None)
+        selected_mode_id = console_mode_id_for_model(model)
+        acct = await _reserve_basic_console_account(directory, model, exclude_tokens=excluded or None)
         if acct is None:
             if attempt == 0:
                 return None
@@ -530,11 +689,22 @@ async def maybe_create_response(
                 async def _run_stream(lease=acct, upstream_lines=upstream):
                     nonlocal success, fail_exc
                     try:
+                        synthetic_response_reasoning_sent = False
                         async for raw_line in upstream_lines:
                             line = _coerce_sse_line(raw_line)
                             if not line.strip():
                                 continue
                             yield _rewrite_response_sse_line(line, model) + "\n\n"
+                            if (
+                                emit_think
+                                and synthesize_response_reasoning
+                                and not synthetic_response_reasoning_sent
+                                and line.startswith("data:")
+                                and line[5:].strip().startswith("{")
+                            ):
+                                for event in _synthetic_response_reasoning_events(make_resp_id("rs")):
+                                    yield event
+                                synthetic_response_reasoning_sent = True
                         success = True
                     except UpstreamError as exc:
                         fail_exc = exc
@@ -551,15 +721,20 @@ async def maybe_create_response(
                         await directory.feedback(
                             lease.token,
                             kind,
-                            _BASIC_FEEDBACK_MODE,
+                            selected_mode_id,
                             now_s_val=now_s(),
                         )
+                        await _record_console_feedback(directory, lease.token, model, kind)
 
                 return _run_stream()
 
             obj = await _post_console_json(acct.token, payload, timeout_s=timeout_s)
             success = True
-            return _normalize_response_model(obj, model)
+            return _normalize_response_model(
+                obj,
+                model,
+                emit_think=emit_think and synthesize_response_reasoning,
+            )
         except UpstreamError as exc:
             fail_exc = exc
             last_exc = exc
@@ -585,9 +760,10 @@ async def maybe_create_response(
                 await directory.feedback(
                     acct.token,
                     kind,
-                    _BASIC_FEEDBACK_MODE,
+                    selected_mode_id,
                     now_s_val=now_s(),
                 )
+                await _record_console_feedback(directory, acct.token, model, kind)
         excluded.append(acct.token)
 
     if last_exc is not None:
@@ -651,6 +827,8 @@ async def maybe_create_chat_completion(
         input_val=response_input,
         instructions=None,
         stream=stream,
+        emit_think=emit_think,
+        synthesize_response_reasoning=False,
         temperature=temperature,
         top_p=top_p,
         max_output_tokens=max_tokens,
@@ -674,7 +852,7 @@ async def maybe_create_chat_completion(
             ct = int(usage.get("output_tokens") or estimate_tokens(text))
             rt = int((usage.get("output_tokens_details") or {}).get("reasoning_tokens") or 0)
             chat_usage = build_usage(pt, ct, reasoning_tokens=rt)
-        return make_chat_response(
+        return _make_console_chat_response(
             model,
             text,
             prompt_content=messages,
@@ -690,6 +868,10 @@ async def maybe_create_chat_completion(
         emitted_text = ""
         emitted_reasoning = ""
         synthetic_reasoning_sent = False
+        if emit_think:
+            emitted_reasoning += _SYNTHETIC_REASONING_TEXT
+            yield f"data: {orjson.dumps(_make_console_thinking_chunk(response_id, model, _SYNTHETIC_REASONING_TEXT)).decode()}\n\n"
+            synthetic_reasoning_sent = True
         async for raw in result:
             for line in _coerce_sse_line(raw).splitlines():
                 if not line.startswith("data:"):
@@ -716,7 +898,7 @@ async def maybe_create_chat_completion(
                     and _event_has_reasoning_item(obj)
                 ):
                     emitted_reasoning += _SYNTHETIC_REASONING_TEXT
-                    yield f"data: {orjson.dumps(make_thinking_chunk(response_id, model, _SYNTHETIC_REASONING_TEXT)).decode()}\n\n"
+                    yield f"data: {orjson.dumps(_make_console_thinking_chunk(response_id, model, _SYNTHETIC_REASONING_TEXT)).decode()}\n\n"
                     synthetic_reasoning_sent = True
                 text, text_is_full = _extract_event_text(obj)
                 if text:
@@ -733,7 +915,7 @@ async def maybe_create_chat_completion(
                     )
                     if delta:
                         emitted_reasoning += delta
-                        yield f"data: {orjson.dumps(make_thinking_chunk(response_id, model, delta)).decode()}\n\n"
+                        yield f"data: {orjson.dumps(_make_console_thinking_chunk(response_id, model, delta)).decode()}\n\n"
                 if event_type == "response.completed" and not done:
                     yield f"data: {orjson.dumps(make_stream_chunk(response_id, model, '', is_final=True)).decode()}\n\n"
                     yield "data: [DONE]\n\n"

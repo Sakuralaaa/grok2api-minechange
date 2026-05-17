@@ -11,6 +11,15 @@ from app.control.account.models import AccountRecord
 from app.control.account.quota_defaults import normalize_quota_set
 from app.control.account.repository import AccountRepository
 from app.control.account.state_machine import derive_status
+from app.control.account.console_usage import (
+    KEY_GROK_4_3,
+    KEY_MULTI_AGENT,
+    KEY_REASONING,
+    VIRTUAL_TOTAL,
+    VIRTUAL_WINDOW_SECONDS,
+    console_success_count,
+    virtual_remaining_from_count,
+)
 from ..shared.enums import POOL_STR_TO_ID, STATUS_STR_TO_ID, StatusId
 from .table import AccountRuntimeTable, make_empty_table
 
@@ -34,25 +43,39 @@ def _record_to_slot_args(record: AccountRecord) -> dict:
 
     heavy_w = qs.heavy
     grok_4_3_w = qs.grok_4_3
+    if record.pool == "basic":
+        console_reasoning = virtual_remaining_from_count(
+            console_success_count(record.ext, KEY_REASONING)
+        )
+        console_multi_agent = virtual_remaining_from_count(
+            console_success_count(record.ext, KEY_MULTI_AGENT)
+        )
+        console_grok_4_3 = virtual_remaining_from_count(
+            console_success_count(record.ext, KEY_GROK_4_3)
+        )
+    else:
+        console_reasoning = max(0, qs.expert.remaining)
+        console_multi_agent = max(0, heavy_w.remaining) if heavy_w is not None else -1
+        console_grok_4_3 = max(0, grok_4_3_w.remaining) if grok_4_3_w is not None else -1
     # fmt: off
     return dict(
         pool_id         = pool_id,
         status_id       = status_id,
         quota_auto      = max(0, qs.auto.remaining),
         quota_fast      = max(0, qs.fast.remaining),
-        quota_expert    = max(0, qs.expert.remaining),
-        quota_heavy     = max(0, heavy_w.remaining)     if heavy_w    is not None else -1,
-        quota_grok_4_3  = max(0, grok_4_3_w.remaining) if grok_4_3_w is not None else -1,
+        quota_expert    = console_reasoning,
+        quota_heavy     = console_multi_agent,
+        quota_grok_4_3  = console_grok_4_3,
         total_auto      = _total(qs.auto),
         total_fast      = _total(qs.fast),
-        total_expert    = _total(qs.expert),
-        total_heavy     = _total(heavy_w),
-        total_grok_4_3  = _total(grok_4_3_w),
+        total_expert    = VIRTUAL_TOTAL if record.pool == "basic" else _total(qs.expert),
+        total_heavy     = VIRTUAL_TOTAL if record.pool == "basic" else _total(heavy_w),
+        total_grok_4_3  = VIRTUAL_TOTAL if record.pool == "basic" else _total(grok_4_3_w),
         window_auto     = _window_s(qs.auto),
         window_fast     = _window_s(qs.fast),
-        window_expert   = _window_s(qs.expert),
-        window_heavy    = _window_s(heavy_w),
-        window_grok_4_3 = _window_s(grok_4_3_w),
+        window_expert   = VIRTUAL_WINDOW_SECONDS if record.pool == "basic" else _window_s(qs.expert),
+        window_heavy    = VIRTUAL_WINDOW_SECONDS if record.pool == "basic" else _window_s(heavy_w),
+        window_grok_4_3 = VIRTUAL_WINDOW_SECONDS if record.pool == "basic" else _window_s(grok_4_3_w),
         reset_auto      = _reset_s(qs.auto),
         reset_fast      = _reset_s(qs.fast),
         reset_expert    = _reset_s(qs.expert),

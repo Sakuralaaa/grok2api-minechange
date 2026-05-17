@@ -128,6 +128,15 @@
       letter-spacing:-.02em;
       margin-top:auto;
     }
+    .stat-subline {
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      color:#8f8f8f;
+      font-size:11px;
+      font-variant-numeric:tabular-nums;
+      line-height:1.2;
+    }
     .stat-muted { color:#a1a1aa !important; }
     [data-random-only] { display:none }
     .stat-grid.mode-random [data-random-only] { display:flex }
@@ -137,8 +146,9 @@
     .stat-grid.mode-random [data-stat-card="disabled"] { order:4 }
     .stat-grid.mode-random [data-stat-card="total"] { order:5 }
     .stat-grid.mode-random [data-stat-card="calls"] { order:6 }
-    .stat-grid.mode-random [data-stat-card="success"] { order:7 }
-    .stat-grid.mode-random [data-stat-card="rate"] { order:8 }
+    .stat-grid.mode-random [data-stat-card="console"] { order:7 }
+    .stat-grid.mode-random [data-stat-card="success"] { order:8 }
+    .stat-grid.mode-random [data-stat-card="rate"] { order:9 }
 
     /* Filters */
     .filter-bar {
@@ -544,7 +554,8 @@
     }
 
     /* Quota pills in table cell */
-    .quota-cell  { display:flex; gap:8px; align-items:center }
+    .quota-cell,
+    .console-cell  { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
     .q-pill {
       height:20px;
       font-size:11px;
@@ -559,6 +570,7 @@
     .q-e { background:#f7f3fb; color:#8d6bbd }
     .q-h { background:#fff4ed; color:#b0632a }
     .q-b { background:#fdf2f7; color:#be3f7f }
+    .q-c { background:#eef7f6; color:#22746f }
     .q-z { background:#f6f6f6; color:#a0a0a6 }
 
     /* Token monospace */
@@ -795,6 +807,16 @@
       </div>
       <div class="stat-num" id="s-calls" style="color:#111">0</div>
     </div>
+    <div class="stat-cell" data-stat-card="console">
+      <div class="stat-top">
+        <div class="stat-label">Console</div>
+        <span class="stat-icon" style="color:#0f766e">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 7h16"/><path d="M7 12h10"/><path d="M10 17h4"/></svg>
+        </span>
+      </div>
+      <div class="stat-num" id="s-console" style="color:#0f766e">0</div>
+      <div class="stat-subline" id="s-console-breakdown">R:0 4.3:0 M:0</div>
+    </div>
     <div class="stat-cell" data-stat-card="success" data-random-only>
       <div class="stat-top">
         <div class="stat-label" data-i18n="account.statSuccessTotal">成功总数</div>
@@ -978,8 +1000,10 @@
               <span class="q-pill q-f">F</span>
               <span class="q-pill q-e">E</span>
               <span class="q-pill q-h">H</span>
+              <span class="q-pill q-c">C</span>
             </span>
           </th>
+          <th class="table-center">Console</th>
           <th class="table-center" data-i18n="account.colSuccess">成功</th>
           <th class="table-center" data-i18n="account.colFail">失败</th>
           <th class="table-center" data-i18n="account.colRate">成功率</th>
@@ -1232,6 +1256,10 @@ function getTokenView() {
     qf: 0,
     qe: 0,
     qh: 0,
+    console: 0,
+    consoleReasoning: 0,
+    consoleGrok43: 0,
+    consoleMultiAgent: 0,
   };
   const statusCounts = { all: 0, active: 0, cooling: 0, invalid: 0, disabled: 0 };
   const nsfwCounts = { all: 0, enabled: 0, disabled: 0 };
@@ -1260,6 +1288,11 @@ function getTokenView() {
     stats.qf += quota.fast?.remaining || 0;
     stats.qe += quota.expert?.remaining || 0;
     stats.qh += quota.heavy?.remaining || 0;
+    const consoleUsage = consoleCounts(token.console_usage || {});
+    stats.consoleReasoning += consoleUsage.reasoning;
+    stats.consoleGrok43 += consoleUsage.grok43;
+    stats.consoleMultiAgent += consoleUsage.multiAgent;
+    stats.console += consoleUsage.total;
 
     if (token.status === 'active') stats.active += 1;
     if (token.status === 'cooling') stats.cooling += 1;
@@ -1325,6 +1358,8 @@ function renderStats(view = getTokenView()) {
   $('s-invalid', stats.invalid);
   $('s-disabled', stats.disabled);
   $('s-calls', fmt(stats.calls));
+  $('s-console', fmt(stats.console));
+  $('s-console-breakdown', `R:${fmt(stats.consoleReasoning)} 4.3:${fmt(stats.consoleGrok43)} M:${fmt(stats.consoleMultiAgent)}`);
   $('s-success', fmt(stats.success));
   $('s-rate', fmtRate(stats.success, stats.fail));
   $('s-qa', fmt(stats.qa)); $('s-qf', fmt(stats.qf)); $('s-qe', fmt(stats.qe)); $('s-qh', fmt(stats.qh));
@@ -1448,7 +1483,7 @@ function renderTable(view = getTokenView()) {
 
   document.getElementById('tbody').innerHTML = slice.length
     ? slice.map(rowHtml).join('')
-    : `<tr><td colspan="10" class="empty-state">${tr('account.empty', null, '暂无 Token，请点击右上角导入或添加。')}</td></tr>`;
+    : `<tr><td colspan="11" class="empty-state">${tr('account.empty', null, '暂无 Token，请点击右上角导入或添加。')}</td></tr>`;
 
   $('pagi-page', tr('account.pageIndicator', { current: total ? curPage : 0, total: pages }, `第 ${total ? curPage : 0} / ${pages} 页`));
   $('section-table-count', total);
@@ -1489,6 +1524,7 @@ function rowHtml(t) {
     <td class="table-center"><span class="badge badge-${t.pool||'basic'}">${xe(poolLabel(t.pool || 'basic'))}</span></td>
     <td class="table-center">${statusBadge(t.status)}</td>
     <td data-quota-only><div class="quota-cell">${qpills(q)}</div></td>
+    <td class="table-center"><div class="console-cell">${consolePills(t.console_usage || {})}</div></td>
     <td class="table-center" style="font-variant-numeric:tabular-nums;color:#8f8f8f">${success}</td>
     <td class="table-center" style="font-variant-numeric:tabular-nums;color:#9a9a9a">${fail}</td>
     <td class="table-center" style="font-variant-numeric:tabular-nums;color:#9a9a9a">${fmtRate(success, fail)}</td>
@@ -1511,6 +1547,33 @@ function rowHtml(t) {
         </button>
     </div></td>
   </tr>`;
+}
+
+function consoleCounts(usage) {
+  const r = usage.reasoning || {};
+  const g = usage.grok_4_3 || {};
+  const m = usage.multi_agent || {};
+  const reasoning = (r.success || 0) + (r.fail || 0);
+  const grok43 = (g.success || 0) + (g.fail || 0);
+  const multiAgent = (m.success || 0) + (m.fail || 0);
+  return {
+    reasoning,
+    grok43,
+    multiAgent,
+    total: reasoning + grok43 + multiAgent,
+  };
+}
+
+function consolePills(usage) {
+  const c = consoleCounts(usage);
+  const items = [
+    ['R', c.reasoning, 'Reasoning'],
+    ['4.3', c.grok43, 'Grok 4.3'],
+    ['M', c.multiAgent, 'Multi-Agent'],
+  ];
+  return items.map(([label, value, title]) =>
+    `<span class="q-pill ${value ? 'q-c' : 'q-z'}" data-tip="${xe(`Console ${title}: ${value}`)}">${label}:${fmt(value)}</span>`
+  ).join('');
 }
 
 function qpills(q) {

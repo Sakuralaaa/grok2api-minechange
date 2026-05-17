@@ -426,6 +426,7 @@ async def responses_endpoint(req: ResponsesCreateRequest):
         input_val=req.input,
         instructions=req.instructions,
         stream=is_stream,
+        emit_think=emit_think,
         temperature=req.temperature or 0.8,
         top_p=req.top_p or 0.95,
         tools=req.tools or None,
