@@ -290,7 +290,7 @@ async def _post_console_stream(
     async def _lines() -> AsyncGenerator[str, None]:
         try:
             async for line in response.aiter_lines():
-                yield line
+                yield _coerce_sse_line(line)
         finally:
             try:
                 await session.close()
@@ -332,6 +332,12 @@ def _rewrite_response_sse_line(line: str, model: str) -> str:
         _normalize_response_model(obj, model)
         return f"data: {orjson.dumps(obj).decode()}"
     return line
+
+
+def _coerce_sse_line(line: Any) -> str:
+    if isinstance(line, bytes):
+        return line.decode("utf-8", "replace")
+    return str(line)
 
 
 def extract_response_text(obj: dict) -> str:
@@ -505,7 +511,7 @@ async def maybe_create_response(
                     nonlocal success, fail_exc
                     try:
                         async for raw_line in upstream_lines:
-                            line = str(raw_line)
+                            line = _coerce_sse_line(raw_line)
                             if not line.strip():
                                 continue
                             yield _rewrite_response_sse_line(line, model) + "\n\n"
@@ -662,7 +668,7 @@ async def maybe_create_chat_completion(
         emitted_text = ""
         emitted_reasoning = ""
         async for raw in result:
-            for line in str(raw).splitlines():
+            for line in _coerce_sse_line(raw).splitlines():
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
