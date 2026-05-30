@@ -48,9 +48,52 @@ _CONSOLE_MODEL_MAP: dict[str, str] = {
     "grok-4.20-expert-console": "grok-4.20-0309-reasoning",
     "grok-4.3-console": "grok-4.3",
     "grok-4.3-beta-console": "grok-4.3",
+    "grok-4.3-low-console": "grok-4.3",
+    "grok-4.3-medium-console": "grok-4.3",
+    "grok-4.3-high-console": "grok-4.3",
     "grok-4.20-multi-agent-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-heavy-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-multi-agent-0309-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-heavy-low-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-heavy-medium-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-heavy-high-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-heavy-xhigh-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-multi-agent-low-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-multi-agent-medium-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-multi-agent-high-console": "grok-4.20-multi-agent-0309",
+    "grok-4.20-multi-agent-xhigh-console": "grok-4.20-multi-agent-0309",
+}
+
+_CONSOLE_FIXED_EFFORT: dict[str, str] = {
+    "grok-4.3-low-console": "low",
+    "grok-4.3-medium-console": "medium",
+    "grok-4.3-high-console": "high",
+    "grok-4.20-heavy-low-console": "low",
+    "grok-4.20-heavy-medium-console": "medium",
+    "grok-4.20-heavy-high-console": "high",
+    "grok-4.20-heavy-xhigh-console": "xhigh",
+    "grok-4.20-multi-agent-low-console": "low",
+    "grok-4.20-multi-agent-medium-console": "medium",
+    "grok-4.20-multi-agent-high-console": "high",
+    "grok-4.20-multi-agent-xhigh-console": "xhigh",
+}
+
+_CONSOLE_EFFORT_MAP: dict[str, str] = {
+    "none": "none",
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+}
+
+_CONSOLE_MODELS_WITH_REASONING_FIELD = frozenset({
+    "grok-4.3",
+    "grok-4.20-multi-agent-0309",
+})
+
+_CONSOLE_MAX_OUTPUT_TOKENS: dict[str, int] = {
+    "grok-4.20-multi-agent-0309": 2_000_000,
 }
 
 
@@ -169,8 +212,15 @@ def _default_console_tools() -> list[dict[str, Any]]:
         return []
     return [
         {"type": "web_search", "enable_image_understanding": True},
-        {"type": "x_search"},
+        {"type": "x_search", "enable_video_understanding": True},
     ]
+
+
+def _console_reasoning_effort(model: str, reasoning_effort: str | None) -> str:
+    return _CONSOLE_FIXED_EFFORT.get(model) or _CONSOLE_EFFORT_MAP.get(
+        reasoning_effort or "medium",
+        "medium",
+    )
 
 
 def _console_url() -> str:
@@ -218,9 +268,11 @@ def _build_console_payload(
     include: list[str] | None = None,
     tools: list[Any] | None = None,
     tool_choice: Any = None,
+    reasoning_effort: str | None = None,
 ) -> bytes:
+    upstream_model = console_upstream_model(model)
     payload: dict[str, Any] = {
-        "model": console_upstream_model(model),
+        "model": upstream_model,
         "input": input_val,
         "temperature": temperature,
         "top_p": top_p,
@@ -231,8 +283,14 @@ def _build_console_payload(
         payload["instructions"] = instructions
     if max_output_tokens is not None:
         payload["max_output_tokens"] = max_output_tokens
+    elif upstream_model in _CONSOLE_MAX_OUTPUT_TOKENS:
+        payload["max_output_tokens"] = _CONSOLE_MAX_OUTPUT_TOKENS[upstream_model]
     if include is not None:
         payload["include"] = include
+    if upstream_model in _CONSOLE_MODELS_WITH_REASONING_FIELD:
+        payload["reasoning"] = {
+            "effort": _console_reasoning_effort(model, reasoning_effort),
+        }
     effective_tools = tools if tools is not None else _default_console_tools()
     if effective_tools:
         payload["tools"] = effective_tools
@@ -644,6 +702,7 @@ async def maybe_create_response(
     include: list[str] | None = None,
     tools: list[Any] | None = None,
     tool_choice: Any = None,
+    reasoning_effort: str | None = None,
     synthesize_response_reasoning: bool = True,
 ) -> dict | AsyncGenerator[str, None] | None:
     if not is_console_basic_model(model):
@@ -666,6 +725,7 @@ async def maybe_create_response(
         include=_console_reasoning_include(include, emit_think),
         tools=tools,
         tool_choice=tool_choice,
+        reasoning_effort=reasoning_effort,
     )
     timeout_s = get_config().get_float("chat.timeout", 120.0)
     max_retries = selection_max_retries()
@@ -814,6 +874,7 @@ async def maybe_create_chat_completion(
     max_tokens: int | None = None,
     tools: list[Any] | None = None,
     tool_choice: Any = None,
+    reasoning_effort: str | None = None,
 ) -> dict | AsyncGenerator[str, None] | None:
     if not is_console_basic_model(model):
         return None
@@ -835,6 +896,7 @@ async def maybe_create_chat_completion(
         include=["reasoning.encrypted_content"],
         tools=tools,
         tool_choice=tool_choice,
+        reasoning_effort=reasoning_effort,
     )
     if result is None:
         return None

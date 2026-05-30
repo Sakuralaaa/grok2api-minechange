@@ -35,6 +35,17 @@ _TAG_RESPONSES = "OpenAI - Responses"
 _TAG_IMAGES = "OpenAI - Images"
 _TAG_VIDEOS = "OpenAI - Videos"
 _TAG_FILES = "OpenAI - Files"
+_MODEL_LIST_HIDDEN_ALIASES = frozenset({
+    "grok-4.20-0309-reasoning-console",
+    "grok-4.20-reasoning-console",
+    "grok-4.3-beta-console",
+    "grok-4.20-multi-agent-console",
+    "grok-4.20-multi-agent-0309-console",
+    "grok-4.20-multi-agent-low-console",
+    "grok-4.20-multi-agent-medium-console",
+    "grok-4.20-multi-agent-high-console",
+    "grok-4.20-multi-agent-xhigh-console",
+})
 
 
 async def _available_pools(request: Request) -> frozenset[str]:
@@ -78,7 +89,8 @@ async def list_models(request: Request):
             "name": m.public_name,
         }
         for m in model_registry.list_enabled()
-        if _model_available_for_pools(m, pools)
+        if m.model_name not in _MODEL_LIST_HIDDEN_ALIASES
+        and _model_available_for_pools(m, pools)
     ]
     return JSONResponse({"object": "list", "data": models})
 
@@ -315,6 +327,7 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 temperature=req.temperature or 0.8,
                 top_p=req.top_p or 0.95,
                 max_tokens=req.max_tokens,
+                reasoning_effort=req.reasoning_effort,
             )
             if result is None:
                 result = await chat_completions(
@@ -418,6 +431,11 @@ async def responses_endpoint(req: ResponsesCreateRequest):
         emit_think = False
     else:
         emit_think = True
+    reasoning_effort = None
+    if isinstance(req.reasoning, dict):
+        effort = req.reasoning.get("effort")
+        if isinstance(effort, str):
+            reasoning_effort = effort
 
     from .console import maybe_create_response
 
@@ -433,6 +451,7 @@ async def responses_endpoint(req: ResponsesCreateRequest):
         tool_choice=req.tool_choice,
         max_output_tokens=req.max_output_tokens,
         include=req.include,
+        reasoning_effort=reasoning_effort,
     )
     if result is None:
         from .responses import create as responses_create

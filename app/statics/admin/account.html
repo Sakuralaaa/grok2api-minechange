@@ -86,6 +86,15 @@
     .stat-grid.mode-random {
       grid-template-columns:repeat(4, minmax(0, 1fr));
     }
+    .stat-grid-quota {
+      display:grid;
+      grid-template-columns:repeat(5, minmax(0, 1fr));
+      gap:12px;
+      margin-bottom:20px;
+    }
+    .stat-grid-quota.mode-random {
+      grid-template-columns:minmax(0, 1fr);
+    }
     .stat-cell {
       min-height:88px;
       padding:14px 16px;
@@ -788,15 +797,6 @@
       </div>
       <div class="stat-num" id="s-disabled" style="color:#6f675d">0</div>
     </div>
-    <div class="stat-cell" data-stat-card="calls">
-      <div class="stat-top">
-        <div class="stat-label" data-i18n="account.statCalls">调用总数</div>
-        <span class="stat-icon" style="color:#111">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 19h14"/><path d="M8 16V10"/><path d="M12 16V6"/><path d="M16 16v-3"/></svg>
-        </span>
-      </div>
-      <div class="stat-num" id="s-calls" style="color:#111">0</div>
-    </div>
     <div class="stat-cell" data-stat-card="success" data-random-only>
       <div class="stat-top">
         <div class="stat-label" data-i18n="account.statSuccessTotal">成功总数</div>
@@ -814,6 +814,18 @@
         </span>
       </div>
       <div class="stat-num" id="s-rate" style="color:#7c3aed">0%</div>
+    </div>
+  </div>
+
+  <div class="stat-grid-quota" id="overview-quota-stats">
+    <div class="stat-cell" data-stat-card="calls">
+      <div class="stat-top">
+        <div class="stat-label" data-i18n="account.statCalls">调用总数</div>
+        <span class="stat-icon" style="color:#111">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M5 19h14"/><path d="M8 16V10"/><path d="M12 16V6"/><path d="M16 16v-3"/></svg>
+        </span>
+      </div>
+      <div class="stat-num" id="s-calls" style="color:#111">0</div>
     </div>
     <div class="stat-cell" data-quota-only>
       <div class="stat-top">
@@ -1205,6 +1217,8 @@ function applyStrategyUI() {
   const isRandom = selectionStrategy === 'random';
   const statsGrid = document.getElementById('overview-stats');
   if (statsGrid) statsGrid.classList.toggle('mode-random', isRandom);
+  const quotaStatsGrid = document.getElementById('overview-quota-stats');
+  if (quotaStatsGrid) quotaStatsGrid.classList.toggle('mode-random', isRandom);
   document.querySelectorAll('[data-quota-only]').forEach(el => {
     el.style.display = isRandom ? 'none' : '';
   });
@@ -1529,18 +1543,19 @@ function consoleCounts(usage) {
     grok43,
     multiAgent,
     total: reasoning + grok43 + multiAgent,
+    buckets: { reasoning: r, grok43: g, multiAgent: m },
   };
 }
 
 function consolePills(usage) {
   const c = consoleCounts(usage);
   const items = [
-    ['R', c.reasoning, 'Reasoning'],
-    ['4.3', c.grok43, 'Grok 4.3'],
-    ['M', c.multiAgent, 'Multi-Agent'],
+    ['R', c.reasoning, 'Reasoning', c.buckets.reasoning],
+    ['4.3', c.grok43, 'Grok 4.3', c.buckets.grok43],
+    ['M', c.multiAgent, 'Multi-Agent', c.buckets.multiAgent],
   ];
-  return items.map(([label, value, title]) =>
-    `<span class="q-pill ${value ? 'q-c' : 'q-z'}" data-tip="${xe(`Console ${title}: ${value}`)}">${label}:${fmt(value)}</span>`
+  return items.map(([label, value, title, bucket]) =>
+    `<span class="q-pill ${value ? 'q-c' : 'q-z'}" data-tip="${xe(`Console ${title}: ${value} (${bucket.success || 0}/${bucket.fail || 0})`)}">${label}:${fmt(value)}</span>`
   ).join('');
 }
 
