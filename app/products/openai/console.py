@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import random
+import re
+import string
+import uuid
 from typing import Any, AsyncGenerator
 
 import orjson
@@ -15,6 +20,8 @@ from app.control.account.console_usage import (
     console_usage_key_for_model,
     increment_console_usage,
 )
+from app.dataplane.proxy.adapters.headers import build_sso_cookie
+from app.dataplane.proxy.adapters.profile import extract_cookie_value
 from app.dataplane.proxy.adapters.session import ResettableSession, build_session_kwargs
 from app.platform.config.snapshot import get_config
 from app.platform.errors import RateLimitError, UpstreamError
@@ -250,10 +257,49 @@ def _console_browser_override() -> str | None:
     return browser or _DEFAULT_CONSOLE_BROWSER
 
 
-def _console_sso_cookie(token: str) -> str:
-    tok = token[4:] if token.startswith("sso=") else token
+def _console_sso_token(token: str) -> str:
+    raw = str(token or "").strip()
+    tok = extract_cookie_value(raw, "sso") if "sso=" in raw else raw
+    if tok.startswith("sso="):
+        tok = tok[4:]
     tok = "".join(str(tok).split())
-    return f"sso={tok}; sso-rw={tok}"
+    return tok
+
+
+def _console_sso_cookie(token: str, lease=None) -> str:
+    return build_sso_cookie(_console_sso_token(token), lease=lease)
+
+
+def _console_statsig_id() -> str:
+    if random.choice((True, False)):
+        rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+        msg = f"x1:TypeError: Cannot read properties of null (reading 'children['{rand}']')"
+    else:
+        rand = "".join(random.choices(string.ascii_lowercase, k=10))
+        msg = f"x1:TypeError: Cannot read properties of undefined (reading '{rand}')"
+    return base64.b64encode(msg.encode()).decode()
+
+
+def _console_client_hints(user_agent: str) -> dict[str, str]:
+    ua = user_agent or ""
+    edge = re.search(r"Edg/(\d+)", ua)
+    chrome = re.search(r"(?:Chrome|Chromium)/(\d+)", ua)
+    version = (edge or chrome).group(1) if (edge or chrome) else "120"
+    brand = "Microsoft Edge" if edge else "Google Chrome"
+    platform = "Windows"
+    if "Mac OS X" in ua or "Macintosh" in ua:
+        platform = "macOS"
+    elif "Android" in ua:
+        platform = "Android"
+    elif "iPhone" in ua or "iPad" in ua:
+        platform = "iOS"
+    elif "Linux" in ua:
+        platform = "Linux"
+    return {
+        "Sec-Ch-Ua": f'"Chromium";v="{version}", "{brand}";v="{version}", "Not/A)Brand";v="99"',
+        "Sec-Ch-Ua-Mobile": "?1" if ("Mobile" in ua or platform in {"Android", "iOS"}) else "?0",
+        "Sec-Ch-Ua-Platform": f'"{platform}"',
+    }
 
 
 def _build_console_payload(
@@ -301,14 +347,27 @@ def _build_console_payload(
 
 
 def _build_console_headers(token: str, _lease) -> dict[str, str]:
-    return {
-        "Content-Type": "application/json",
-        "Cookie": _console_sso_cookie(token),
-        "Origin": "https://console.x.ai",
-        "User-Agent": _console_user_agent(),
+    user_agent = _console_user_agent()
+    headers = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
         "Authorization": "Bearer anonymous",
+        "Content-Type": "application/json",
+        "Cookie": _console_sso_cookie(token, lease=_lease),
+        "Origin": "https://console.x.ai",
+        "Priority": "u=1, i",
+        "Referer": _console_referer(),
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": user_agent,
         "X-Cluster": _console_cluster(),
+        "x-statsig-id": _console_statsig_id(),
+        "x-xai-request-id": str(uuid.uuid4()),
     }
+    headers.update(_console_client_hints(user_agent))
+    return headers
 
 
 def _proxy_feedback_kind(status: int | None):
