@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from contextlib import suppress
 import random
 import re
 import string
 import uuid
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, AsyncIterable
 
 import orjson
 
@@ -236,6 +237,14 @@ def _console_url() -> str:
 
 def _console_cluster() -> str:
     return get_config().get_str("console.cluster", "https://us-east-1.api.x.ai")
+
+
+def _console_stream_heartbeat_interval() -> float:
+    interval = get_config().get_float(
+        "console.stream_heartbeat_interval",
+        get_config().get_float("chat.stream_heartbeat_interval", 15.0),
+    )
+    return max(0.0, interval)
 
 
 def _console_referer() -> str:
@@ -618,6 +627,51 @@ def _coerce_sse_line(line: Any) -> str:
     return str(line)
 
 
+async def _iter_with_console_heartbeat(
+    source: AsyncIterable[Any],
+) -> AsyncGenerator[Any, None]:
+    interval = _console_stream_heartbeat_interval()
+    if interval <= 0:
+        async for item in source:
+            yield item
+        return
+
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def _produce() -> None:
+        try:
+            async for item in source:
+                await queue.put(("item", item))
+        except BaseException as exc:
+            await queue.put(("error", exc))
+        else:
+            await queue.put(("done", None))
+
+    task = asyncio.create_task(_produce())
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=interval)
+            except asyncio.TimeoutError:
+                yield ": ping"
+                continue
+            if kind == "item":
+                yield payload
+            elif kind == "error":
+                raise payload
+            else:
+                break
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+def _is_sse_comment(line: str) -> bool:
+    return line.lstrip().startswith(":")
+
+
 def extract_response_text(obj: dict) -> str:
     texts: list[str] = []
     direct = obj.get("output_text")
@@ -809,9 +863,12 @@ async def maybe_create_response(
                     nonlocal success, fail_exc
                     try:
                         synthetic_response_reasoning_sent = False
-                        async for raw_line in upstream_lines:
+                        async for raw_line in _iter_with_console_heartbeat(upstream_lines):
                             line = _coerce_sse_line(raw_line)
                             if not line.strip():
+                                continue
+                            if _is_sse_comment(line):
+                                yield line.rstrip("\n") + "\n\n"
                                 continue
                             yield _rewrite_response_sse_line(line, model) + "\n\n"
                             if (
@@ -993,8 +1050,12 @@ async def maybe_create_chat_completion(
             emitted_reasoning += _SYNTHETIC_REASONING_TEXT
             yield f"data: {orjson.dumps(_make_console_thinking_chunk(response_id, model, _SYNTHETIC_REASONING_TEXT)).decode()}\n\n"
             synthetic_reasoning_sent = True
-        async for raw in result:
-            for line in _coerce_sse_line(raw).splitlines():
+        async for raw in _iter_with_console_heartbeat(result):
+            raw_text = _coerce_sse_line(raw)
+            if _is_sse_comment(raw_text):
+                yield raw_text.rstrip("\n") + "\n\n"
+                continue
+            for line in raw_text.splitlines():
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
