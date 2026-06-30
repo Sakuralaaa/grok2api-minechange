@@ -127,6 +127,16 @@ on_demand_min_interval_sec = 300
 max_inflight = 8
 
 
+# ==================== Register panel helpers ====================
+[register.mail]
+# Mail provider config used by the admin Register page for connectivity checks only.
+# Supported provider types: cloudflare_temp_email, cloudmail_gen.
+request_timeout = 30
+wait_timeout = 30
+wait_interval = 2
+providers = []
+
+
 # ==================== 对话配置 ====================
 [chat]
 timeout = 60

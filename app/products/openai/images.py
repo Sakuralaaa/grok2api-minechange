@@ -170,13 +170,18 @@ def _normalize_response_format(response_format: str) -> str:
     return fmt
 
 
-def _app_url() -> str:
-    return get_config().get_str("app.app_url", "").rstrip("/")
+def _app_url(public_base_url: str | None = None) -> str:
+    configured = get_config().get_str("app.app_url", "").rstrip("/")
+    if configured:
+        return configured
+    return (public_base_url or "").rstrip("/")
 
 
-def _local_image_url(file_id: str) -> str:
-    app_url = _app_url()
-    return f"{app_url}/v1/files/image?id={file_id}"
+def _local_image_url(file_id: str, public_base_url: str | None = None) -> str:
+    app_url = _app_url(public_base_url)
+    if app_url:
+        return f"{app_url}/v1/files/image?id={file_id}"
+    return f"/v1/files/image?id={file_id}"
 
 
 def _extract_image_file_id(url: str) -> str:
@@ -219,6 +224,7 @@ async def _resolve_image_output(
     url: str,
     response_format: str,
     blob_b64: str | None = None,
+    public_base_url: str | None = None,
 ) -> _ImageOutput:
     fmt = _normalize_response_format(response_format)
     cfg = get_config()
@@ -227,8 +233,6 @@ async def _resolve_image_output(
         and _is_imagine_public_url(url)
         and not cfg.get_bool("features.imagine_public_image_proxy", False)
     ):
-        return _ImageOutput(api_value=url, markdown_value=f"![image]({url})")
-    if fmt == "url" and not _app_url():
         return _ImageOutput(api_value=url, markdown_value=f"![image]({url})")
 
     mime = infer_content_type(url) or "image/jpeg"
@@ -251,7 +255,7 @@ async def _resolve_image_output(
         mime,
         _extract_image_file_id(url),
     )
-    local_url = _local_image_url(file_id)
+    local_url = _local_image_url(file_id, public_base_url)
     return _ImageOutput(api_value=local_url, markdown_value=f"![image]({local_url})")
 
 
@@ -278,6 +282,7 @@ async def generate(
     response_format: str  = "url",
     stream:          bool = False,
     chat_format:     bool = False,
+    public_base_url: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Generate images.
 
@@ -308,6 +313,7 @@ async def generate(
             response_format = response_format,
             stream          = stream,
             chat_format     = chat_format,
+            public_base_url = public_base_url,
         )
 
     acct = await _acct_dir.reserve_any(
@@ -374,6 +380,7 @@ async def generate(
                         url=ev.get("url", ""),
                         response_format=response_format,
                         blob_b64=ev.get("blob") or None,
+                        public_base_url=public_base_url,
                     )
                     content = _output_content(image, chat_format=chat_format)
                     chunk = make_stream_chunk(response_id, model, content)
@@ -447,6 +454,7 @@ async def generate(
                     url=ev.get("url", ""),
                     response_format=response_format,
                     blob_b64=ev.get("blob") or None,
+                    public_base_url=public_base_url,
                 )
                 finals.append(image)
         success = True
@@ -493,6 +501,7 @@ async def _generate_lite(
     response_format: str,
     stream:          bool,
     chat_format:     bool,
+    public_base_url: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Generate images via the chat endpoint (Aurora model path).
 
@@ -523,6 +532,7 @@ async def _generate_lite(
                     n=n,
                     timeout_s=timeout_s,
                     response_format=response_format,
+                    public_base_url=public_base_url,
                     progress_cb=_progress,
                 )
             )
@@ -569,6 +579,7 @@ async def _generate_lite(
         n=n,
         timeout_s=timeout_s,
         response_format=response_format,
+        public_base_url=public_base_url,
         progress_cb=lambda idx, progress: _lite_progress_updates(
             idx=idx,
             progress=progress,
@@ -976,6 +987,7 @@ async def _run_lite_request(
     prompt:    str,
     timeout_s: float,
     response_format: str,
+    public_base_url: str | None = None,
     progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _ImageOutput:
     from app.dataplane.account import _directory as _acct_dir
@@ -1029,6 +1041,7 @@ async def _run_lite_request(
                             token=token,
                             url=ev.content,
                             response_format=response_format,
+                            public_base_url=public_base_url,
                         )
                         success = True
                         return image
@@ -1082,6 +1095,7 @@ async def _run_lite_batch(
     n: int,
     timeout_s: float,
     response_format: str,
+    public_base_url: str | None = None,
     progress_cb: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> list[_ImageOutput]:
     results: list[_ImageOutput | None] = [None] * n
@@ -1092,6 +1106,7 @@ async def _run_lite_batch(
             prompt=prompt,
             timeout_s=timeout_s,
             response_format=response_format,
+            public_base_url=public_base_url,
             progress_cb=None if progress_cb is None else lambda progress: progress_cb(idx, progress),
         )
 

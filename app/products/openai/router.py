@@ -228,7 +228,7 @@ async def _upload_to_data_uri(upload: UploadFile, *, param: str) -> str:
 @router.post(
     "/chat/completions", tags=[_TAG_CHAT], dependencies=[Depends(verify_api_key)]
 )
-async def chat_completions_endpoint(req: ChatCompletionRequest):
+async def chat_completions_endpoint(req: ChatCompletionRequest, request: Request):
     _validate_chat(req)
     from app.platform.config.snapshot import get_config
 
@@ -290,6 +290,7 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 response_format=fmt,
                 stream=is_stream,
                 chat_format=True,
+                public_base_url=str(request.base_url).rstrip("/"),
             )
 
         elif spec.is_video():
@@ -485,7 +486,7 @@ async def responses_endpoint(req: ResponsesCreateRequest):
 @router.post(
     "/images/generations", tags=[_TAG_IMAGES], dependencies=[Depends(verify_api_key)]
 )
-async def image_generations(req: ImageGenerationRequest):
+async def image_generations(req: ImageGenerationRequest, request: Request):
     spec = model_registry.get(req.model)
     if spec is None or not spec.enabled or not spec.is_image():
         raise ValidationError(
@@ -503,6 +504,7 @@ async def image_generations(req: ImageGenerationRequest):
         response_format=req.response_format or "url",
         stream=False,
         chat_format=False,
+        public_base_url=str(request.base_url).rstrip("/"),
     )
     return JSONResponse(result)
 

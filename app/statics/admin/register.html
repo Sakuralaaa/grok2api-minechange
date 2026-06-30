@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="register.pageTitle">Grok2API - 注册机</title>
+  <link rel="icon" href="/favicon.ico?v={{APP_VERSION}}">
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link href="/static/css/app.css?v={{APP_VERSION}}" rel="stylesheet">
+  <style>
+    body { background:#FAF9F5 }
+
+    .page-hd { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px }
+    .page-title { font-size:22px; font-weight:700; line-height:1.2 }
+    .page-sub { font-size:13px; color:var(--fg-muted); margin-top:5px }
+    .page-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end }
+    .page-action-btn {
+      height:32px; padding:0 14px; border-radius:999px;
+      display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      font-size:13px; font-weight:600;
+      border:1px solid #e6e6e6; background:#fafafa; color:#444;
+    }
+    .page-action-btn:hover { background:#f3f3f3; border-color:#dcdcdc }
+    .page-action-btn-primary { background:#111; border-color:#111; color:#fff }
+    .page-action-btn-primary:hover { background:#222; border-color:#222 }
+    .page-action-btn:disabled { opacity:.45; pointer-events:none }
+
+    .section-head {
+      display:flex; align-items:baseline; justify-content:space-between;
+      gap:12px; margin:28px 0 14px;
+    }
+    .section-title { font-size:13px; font-weight:600; color:#222; letter-spacing:0 }
+    .section-meta { font-size:12px; color:#8f8f8f }
+
+    .reg-stat-grid {
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:12px;
+      margin-bottom:28px;
+    }
+    .reg-stat {
+      min-height:88px;
+      padding:14px 16px;
+      border-radius:12px;
+      background:#fff;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .reg-stat-top { display:flex; align-items:center; justify-content:space-between; gap:10px }
+    .reg-stat-label { font-size:11px; color:#8a8a8a; letter-spacing:0; white-space:nowrap }
+    .reg-stat-icon { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; color:#a3a3a3; flex:0 0 auto }
+    .reg-stat-icon svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+    .reg-stat-value {
+      margin-top:auto;
+      min-width:0;
+      font-size:22px;
+      font-weight:600;
+      line-height:1;
+      letter-spacing:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .reg-stat-sub { margin-top:-6px; min-height:14px; font-size:11px; color:#8a8a8a; font-variant-numeric:tabular-nums }
+
+    .reg-layout {
+      display:grid;
+      grid-template-columns:minmax(0, 1.2fr) minmax(340px, .8fr);
+      gap:16px;
+      align-items:start;
+    }
+    .reg-stack { display:grid; gap:16px }
+    .reg-panel { background:#fff; border:none; border-radius:12px; overflow:hidden }
+    .reg-panel-title {
+      font-size:11px;
+      font-weight:700;
+      color:#8d8d8d;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      padding:12px 16px 6px;
+      background:#fff;
+    }
+    .reg-row {
+      display:grid;
+      grid-template-columns:minmax(0, 2fr) minmax(300px, 1fr);
+      gap:18px;
+      align-items:center;
+      padding:11px 16px;
+      border-bottom:1px solid #f5f5f5;
+    }
+    .reg-row:last-child { border-bottom:none }
+    .reg-label-col { min-width:0; display:grid; gap:3px; align-content:start }
+    .reg-label { font-size:12px; font-weight:600; color:#222; line-height:1.35 }
+    .reg-desc { max-width:560px; font-size:11px; color:#9a9a9a; line-height:1.45 }
+    .reg-control-col { min-width:0 }
+    .reg-input,
+    .reg-select,
+    .reg-textarea {
+      width:100%;
+      border-radius:8px;
+      border:1px solid #ececec;
+      background:#fbfbfb;
+      color:#222;
+      font:inherit;
+      font-size:13px;
+      outline:none;
+      transition:border-color .15s, background .15s, box-shadow .15s;
+    }
+    .reg-input,
+    .reg-select { height:34px; padding:0 10px }
+    .reg-textarea {
+      min-height:220px;
+      padding:10px;
+      resize:vertical;
+      font-family:'Geist Mono','Courier New',monospace;
+      line-height:1.5;
+    }
+    .reg-textarea-sm { min-height:72px }
+    .reg-input:focus,
+    .reg-select:focus,
+    .reg-textarea:focus { border-color:#bbb; background:#fff; box-shadow:0 0 0 2px rgba(0,0,0,.04) }
+    .reg-actions {
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      flex-wrap:wrap;
+      padding:12px 16px 14px;
+      border-top:1px solid #f5f5f5;
+    }
+    .reg-result {
+      display:none;
+      margin:0 16px 14px;
+      padding:11px 12px;
+      border-radius:10px;
+      background:#f8fafc;
+      color:#334155;
+      font-size:12px;
+      line-height:1.6;
+    }
+    .reg-result.visible { display:block }
+    .reg-note {
+      margin:0 16px 14px;
+      padding:11px 12px;
+      border-radius:10px;
+      background:#f9fafb;
+      color:#555;
+      font-size:12px;
+      line-height:1.6;
+    }
+    .reg-note code {
+      font-family:'Geist Mono','Courier New',monospace;
+      background:#eee;
+      padding:1px 4px;
+      border-radius:4px;
+    }
+
+    .status-list { display:grid }
+    .status-row {
+      display:grid;
+      grid-template-columns:120px minmax(0,1fr);
+      gap:10px;
+      align-items:start;
+      padding:10px 16px;
+      border-bottom:1px solid #f5f5f5;
+    }
+    .status-row:last-child { border-bottom:none }
+    .status-key { font-size:12px; color:#8a8a8a }
+    .status-value { min-width:0; font-size:12px; color:#222; word-break:break-word }
+    .badge {
+      min-height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      display:inline-flex;
+      align-items:center;
+      font-size:11px;
+      font-weight:700;
+      vertical-align:middle;
+    }
+    .badge-ok { background:#ecfdf5; color:#059669 }
+    .badge-warn { background:#fff7ed; color:#ea580c }
+    .badge-muted { background:#f5f5f5; color:#666 }
+
+    .provider-list { display:grid; gap:12px; padding:0 16px 14px }
+    .provider-empty { margin:0; padding:11px 12px; border-radius:10px; background:#f9fafb; color:#666; font-size:12px }
+    .provider-card { border:1px solid #f0f0f0; border-radius:10px; background:#fff; overflow:hidden }
+    .provider-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:11px 12px;
+      border-bottom:1px solid #f5f5f5;
+    }
+    .provider-title { min-width:0; font-size:12px; font-weight:700; color:#333; overflow:hidden; text-overflow:ellipsis }
+    .provider-body { padding:12px; display:grid; gap:10px }
+    .provider-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px }
+    .provider-field { display:grid; gap:6px; min-width:0 }
+    .provider-field.full { grid-column:1 / -1 }
+    .provider-label { font-size:12px; font-weight:600; color:#333 }
+    .provider-toggle { display:inline-flex; align-items:center; gap:7px; color:#666; font-size:12px; font-weight:600 }
+    .provider-toggle input { width:14px; height:14px; accent-color:#111 }
+    .client-code {
+      display:block;
+      margin-top:8px;
+      padding:10px 12px;
+      border-radius:10px;
+      background:#f6f1e7;
+      color:#2e2a25;
+      font-family:'Geist Mono','Courier New',monospace;
+      font-size:11px;
+      line-height:1.6;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+    }
+    .client-models {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:8px;
+    }
+
+    @media (max-width:980px) {
+      .reg-stat-grid { grid-template-columns:repeat(2, minmax(0, 1fr)) }
+      .reg-layout { grid-template-columns:1fr }
+      .reg-row { grid-template-columns:1fr; gap:8px; align-items:start }
+    }
+    @media (max-width:640px) {
+      .page-hd { display:block }
+      .page-actions { justify-content:flex-start; margin-top:14px }
+      .reg-stat-grid { grid-template-columns:1fr }
+      .provider-grid { grid-template-columns:1fr }
+      .status-row { grid-template-columns:96px minmax(0,1fr) }
+    }
+  </style>
+</head>
+<body>
+<div id="admin-header" data-active="/admin/register"></div>
+
+<main class="admin-main" style="padding-bottom:60px">
+  <div class="page-hd">
+    <div>
+      <div class="page-title" data-i18n="register.pageHeading">注册机</div>
+      <div class="page-sub" data-i18n="register.pageSubtitle">导入合法持有的 sso token，并检查代理、FlareSolverr 与邮箱服务状态。</div>
+    </div>
+    <div class="page-actions">
+      <a class="page-action-btn" href="/admin/config" data-i18n="register.openConfig">配置管理</a>
+      <button id="btn-refresh-top" class="page-action-btn page-action-btn-primary" type="button" data-i18n="register.refresh">刷新状态</button>
+    </div>
+  </div>
+
+  <div class="section-head" style="margin-top:0">
+    <div class="section-title" data-i18n="register.sectionOverview">运行状态</div>
+    <div class="section-meta" id="status-updated">-</div>
+  </div>
+
+  <div class="reg-stat-grid">
+    <div class="reg-stat">
+      <div class="reg-stat-top">
+        <div class="reg-stat-label" data-i18n="register.proxyMode">代理模式</div>
+        <div class="reg-stat-icon"><svg viewBox="0 0 24 24"><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/><path d="M4 6v12"/></svg></div>
+      </div>
+      <div class="reg-stat-value" id="stat-proxy-mode">-</div>
+      <div class="reg-stat-sub" id="stat-proxy-url">-</div>
+    </div>
+    <div class="reg-stat">
+      <div class="reg-stat-top">
+        <div class="reg-stat-label" data-i18n="register.proxyPool">代理池数量</div>
+        <div class="reg-stat-icon"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="12" cy="17" r="3"/></svg></div>
+      </div>
+      <div class="reg-stat-value" id="stat-proxy-pool">0</div>
+      <div class="reg-stat-sub" data-i18n="register.socksSupported">SOCKS 已支持</div>
+    </div>
+    <div class="reg-stat">
+      <div class="reg-stat-top">
+        <div class="reg-stat-label">FlareSolverr</div>
+        <div class="reg-stat-icon"><svg viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M18.36 5.64l-2.12 2.12"/><path d="M21 12h-3"/><path d="M18.36 18.36l-2.12-2.12"/><path d="M12 21v-3"/><path d="M5.64 18.36l2.12-2.12"/><path d="M3 12h3"/><path d="M5.64 5.64l2.12 2.12"/></svg></div>
+      </div>
+      <div class="reg-stat-value" id="stat-flaresolverr">-</div>
+      <div class="reg-stat-sub" id="stat-clearance-mode">-</div>
+    </div>
+    <div class="reg-stat">
+      <div class="reg-stat-top">
+        <div class="reg-stat-label" data-i18n="register.mailProviders">邮箱服务</div>
+        <div class="reg-stat-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg></div>
+      </div>
+      <div class="reg-stat-value" id="stat-mail-count">0</div>
+      <div class="reg-stat-sub" id="stat-mail-state" data-i18n="register.notConfigured">未配置</div>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <div class="section-title" data-i18n="register.sectionWorkflow">导入与服务配置</div>
+  </div>
+
+  <div class="reg-layout">
+    <div class="reg-stack">
+      <section class="reg-panel">
+        <div class="reg-panel-title" data-i18n="register.importTitle">账户导入</div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="pool" data-i18n="register.poolLabel">导入账户池</label>
+            <div class="reg-desc" data-i18n="register.poolDesc">auto 会在导入后同步刷新并识别账户额度；其他池会在后台刷新。</div>
+          </div>
+          <div class="reg-control-col">
+            <select id="pool" class="reg-select">
+              <option value="basic">basic</option>
+              <option value="super">super</option>
+              <option value="heavy">heavy</option>
+              <option value="auto">auto</option>
+            </select>
+          </div>
+        </div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="tokens" data-i18n="register.tokensLabel">sso token 列表</label>
+            <div class="reg-desc" data-i18n="register.tokensDesc">每行一个 token，可带 sso= 前缀；提交前会清理空白和重复项。</div>
+          </div>
+          <div class="reg-control-col">
+            <textarea id="tokens" class="reg-textarea" spellcheck="false" placeholder="sso=...&#10;eyJ..."></textarea>
+          </div>
+        </div>
+        <div id="result" class="reg-result"></div>
+        <div class="reg-note" data-i18n="register.safeNote">此页面只提供合法账户导入和连接状态检查，不包含自动注册、浏览器自动化或验证码绕过功能。</div>
+        <div class="reg-actions">
+          <button id="btn-clear" class="page-action-btn" type="button" data-i18n="register.clear">清空</button>
+          <button id="btn-import" class="page-action-btn page-action-btn-primary" type="button" data-i18n="register.import">导入</button>
+        </div>
+      </section>
+
+      <section class="reg-panel">
+        <div class="reg-panel-title" data-i18n="register.mailTitle">CF 邮箱接入</div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="mail-request-timeout" data-i18n="register.requestTimeout">请求超时</label>
+            <div class="reg-desc" data-i18n="register.requestTimeoutDesc">检查邮箱 provider API 的单次请求超时，单位秒。</div>
+          </div>
+          <div class="reg-control-col">
+            <input id="mail-request-timeout" class="reg-input" type="number" min="1" value="30">
+          </div>
+        </div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="mail-wait-timeout" data-i18n="register.waitTimeout">等待超时</label>
+            <div class="reg-desc" data-i18n="register.waitTimeoutDesc">保留给后续邮箱等待流程的超时配置，单位秒。</div>
+          </div>
+          <div class="reg-control-col">
+            <input id="mail-wait-timeout" class="reg-input" type="number" min="1" value="30">
+          </div>
+        </div>
+        <div id="mail-providers" class="provider-list"></div>
+        <div class="reg-actions">
+          <button id="btn-add-cf-temp" class="page-action-btn" type="button" data-i18n="register.addCloudflareTemp">添加 cloudflare_temp_email</button>
+          <button id="btn-add-cloudmail" class="page-action-btn" type="button" data-i18n="register.addCloudmail">添加 cloudmail_gen</button>
+          <button id="btn-save-mail" class="page-action-btn page-action-btn-primary" type="button" data-i18n="register.saveMail">保存邮箱配置</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="reg-stack">
+      <aside class="reg-panel">
+        <div class="reg-panel-title" data-i18n="register.statusTitle">连接详情</div>
+        <div id="status" class="status-list">
+          <div class="status-row">
+            <div class="status-key" data-i18n="register.loading">加载中</div>
+            <div class="status-value">...</div>
+          </div>
+        </div>
+        <div class="reg-actions">
+          <button id="btn-refresh" class="page-action-btn" type="button" data-i18n="register.refresh">刷新状态</button>
+        </div>
+        <div class="reg-note">
+          Docker Compose 内的 FlareSolverr URL 可填写 <code>http://flaresolverr:8191</code>；SOCKS 出口可填写 <code>socks5://proxy:1080</code>。
+        </div>
+      </aside>
+
+      <section class="reg-panel">
+        <div class="reg-panel-title" data-i18n="register.clientTitle">第三方客户端</div>
+        <div id="client-status" class="status-list">
+          <div class="status-row">
+            <div class="status-key" data-i18n="register.loading">加载中</div>
+            <div class="status-value">...</div>
+          </div>
+        </div>
+        <div class="reg-note">
+          <span data-i18n="register.clientHint">第三方客户端 Base URL 填写下方地址，API Key 使用配置管理中的 app.api_key。</span>
+          <code id="client-curl" class="client-code">curl ...</code>
+          <code id="client-sdk" class="client-code">base_url = ...</code>
+          <div id="client-models" class="client-models"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script src="/static/js/i18n.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/auth.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/admin-header.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/toast.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/footer.js?v={{APP_VERSION}}"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+
+function tr(key, params, fallback) {
+  if (typeof window.t === 'function') {
+    const value = t(key, params);
+    if (value !== key) return value;
+  }
+  return fallback;
+}
+
+function waitI18n() {
+  return new Promise((resolve) => {
+    if (window.I18n?.onReady) I18n.onReady(resolve);
+    else resolve();
+  });
+}
+
+async function api(path, options = {}) {
+  const key = await adminKey.get();
+  const res = await fetch(ADMIN_API + path, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${key}`,
+    },
+  });
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
+  if (!res.ok) {
+    const message = data?.error?.message || data?.detail || data?.message || res.statusText || res.status;
+    throw new Error(message);
+  }
+  return data;
+}
+
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
+}
+
+function parseTokens(raw) {
+  const seen = new Set();
+  const tokens = [];
+  String(raw || '').split(/\r?\n|,|，/).forEach((line) => {
+    let token = line.trim().replace(/^sso=/, '').replace(/\s+/g, '');
+    token = token.replace(/[^\x21-\x7e]/g, '');
+    if (token && !seen.has(token)) {
+      seen.add(token);
+      tokens.push(token);
+    }
+  });
+  return tokens;
+}
+
+function badge(text, cls) {
+  return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
+}
+
+function row(key, value) {
+  return `<div class="status-row"><div class="status-key">${escapeHtml(key)}</div><div class="status-value">${value}</div></div>`;
+}
+
+function splitLines(value) {
+  return String(value || '').split(/\r?\n|,|，/).map((item) => item.trim()).filter(Boolean);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/"/g, '&quot;');
+}
+
+function isMaskedSecret(value) {
+  const text = String(value || '').trim();
+  return text === '***' || text.includes('...');
+}
+
+let mailProviders = [];
+let originalMailProviders = [];
+
+function defaultProvider(type) {
+  if (type === 'cloudmail_gen') {
+    return { type, enable: true, api_base: '', admin_email: '', admin_password: '', domain: [], subdomain: [], email_prefix: '' };
+  }
+  return { type: 'cloudflare_temp_email', enable: true, api_base: '', admin_password: '', domain: [] };
+}
+
+function renderMailProviders() {
+  const mount = $('mail-providers');
+  if (!mailProviders.length) {
+    mount.innerHTML = `<div class="provider-empty">${escapeHtml(tr('register.noMailProviders', null, '尚未配置 CF 邮箱 provider。'))}</div>`;
+    return;
+  }
+
+  mount.innerHTML = mailProviders.map((provider, index) => {
+    const domains = Array.isArray(provider.domain) ? provider.domain.join('\n') : '';
+    const subdomains = Array.isArray(provider.subdomain) ? provider.subdomain.join('\n') : '';
+    const isCloudMail = provider.type === 'cloudmail_gen';
+    return `
+      <div class="provider-card" data-provider-index="${index}">
+        <div class="provider-head">
+          <div>
+            <div class="provider-title">${escapeHtml(provider.type)}</div>
+            <label class="provider-toggle">
+              <input type="checkbox" data-mail-field="enable" ${provider.enable !== false ? 'checked' : ''}>
+              ${escapeHtml(tr('register.enabled', null, '启用'))}
+            </label>
+          </div>
+          <button class="page-action-btn" type="button" data-delete-provider="${index}">${escapeHtml(tr('register.delete', null, '删除'))}</button>
+        </div>
+        <div class="provider-body">
+          <div class="provider-grid">
+            <div class="provider-field full">
+              <label class="provider-label">API Base</label>
+              <input class="reg-input" data-mail-field="api_base" value="${escapeAttr(provider.api_base || '')}" placeholder="${isCloudMail ? 'https://your-cloudmail.example.com' : 'https://your-cf-temp-mail.example.com'}">
+            </div>
+            ${isCloudMail ? `
+              <div class="provider-field">
+                <label class="provider-label">${escapeHtml(tr('register.adminEmail', null, '管理员邮箱'))}</label>
+                <input class="reg-input" data-mail-field="admin_email" value="${escapeAttr(provider.admin_email || '')}">
+              </div>
+            ` : ''}
+            <div class="provider-field">
+              <label class="provider-label">${escapeHtml(isCloudMail ? tr('register.adminPassword', null, '管理员密码') : 'Admin Password')}</label>
+              <input class="reg-input" type="password" data-mail-field="admin_password" value="${escapeAttr(provider.admin_password || '')}">
+            </div>
+            ${isCloudMail ? `
+              <div class="provider-field">
+                <label class="provider-label">${escapeHtml(tr('register.emailPrefix', null, '邮箱前缀'))}</label>
+                <input class="reg-input" data-mail-field="email_prefix" value="${escapeAttr(provider.email_prefix || '')}" placeholder="optional">
+              </div>
+            ` : ''}
+            <div class="provider-field full">
+              <label class="provider-label">${escapeHtml(tr('register.domainList', null, '域名列表'))}</label>
+              <textarea class="reg-textarea reg-textarea-sm" data-mail-field="domain" placeholder="${escapeAttr(tr('register.onePerLine', null, '每行一个'))}">${escapeHtml(domains)}</textarea>
+            </div>
+            ${isCloudMail ? `
+              <div class="provider-field full">
+                <label class="provider-label">${escapeHtml(tr('register.subdomainList', null, '子域名列表'))}</label>
+                <textarea class="reg-textarea reg-textarea-sm" data-mail-field="subdomain" placeholder="${escapeAttr(tr('register.onePerLine', null, '每行一个'))}">${escapeHtml(subdomains)}</textarea>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  mount.querySelectorAll('[data-mail-field]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const card = input.closest('[data-provider-index]');
+      const index = Number(card.dataset.providerIndex);
+      const field = input.dataset.mailField;
+      if (field === 'enable') {
+        mailProviders[index][field] = input.checked;
+      } else if (field === 'domain' || field === 'subdomain') {
+        mailProviders[index][field] = splitLines(input.value);
+      } else {
+        mailProviders[index][field] = input.value;
+      }
+    });
+    input.addEventListener('change', () => input.dispatchEvent(new Event('input')));
+  });
+  mount.querySelectorAll('[data-delete-provider]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      mailProviders.splice(Number(btn.dataset.deleteProvider), 1);
+      renderMailProviders();
+    });
+  });
+}
+
+function applyMailConfig(mail) {
+  const cfg = mail?.config || mail || {};
+  $('mail-request-timeout').value = cfg.request_timeout || 30;
+  $('mail-wait-timeout').value = cfg.wait_timeout || 30;
+  mailProviders = Array.isArray(cfg.providers) ? cfg.providers.map((item) => ({ ...item })) : [];
+  originalMailProviders = mailProviders.map((item) => ({ ...item }));
+  renderMailProviders();
+}
+
+function mailStatusRows(mail) {
+  const checks = Array.isArray(mail?.checks) ? mail.checks : [];
+  if (!checks.length) return [row(tr('register.mailProviders', null, '邮箱服务'), badge(tr('register.notConfigured', null, '未配置'), 'badge-muted'))];
+  return checks.map((item) => {
+    const check = item.check || {};
+    const state = check.ok
+      ? badge(tr('register.connected', null, '连接正常'), 'badge-ok')
+      : badge(tr('register.failed', null, '连接失败'), 'badge-warn');
+    const meta = [
+      item.api_base || '-',
+      item.domain_count ? `domains=${item.domain_count}` : '',
+      check.domain_count ? `remote=${check.domain_count}` : '',
+      check.message || '',
+    ].filter(Boolean).join(' ');
+    return row(`${tr('register.mailProvider', null, '邮箱')} #${item.index + 1}`, `${escapeHtml(item.type)} ${state}<br>${escapeHtml(meta)}`);
+  });
+}
+
+function updateOverview(data) {
+  const proxy = data.proxy || {};
+  const clearance = data.clearance || {};
+  const fs = clearance.flaresolverr || {};
+  const checks = Array.isArray(data.mail?.checks) ? data.mail.checks : [];
+  const okMail = checks.filter((item) => item?.check?.ok).length;
+
+  setText('stat-proxy-mode', proxy.mode || 'direct');
+  setText('stat-proxy-url', proxy.proxy_url || '-');
+  setText('stat-proxy-pool', String(proxy.proxy_pool_size || 0));
+  setText('stat-clearance-mode', clearance.mode || 'none');
+  setText('stat-flaresolverr', !fs.configured ? tr('register.notConfigured', null, '未配置') : fs.ok ? 'OK' : tr('register.failed', null, '连接失败'));
+  setText('stat-mail-count', String(checks.length));
+  setText('stat-mail-state', checks.length ? `${okMail}/${checks.length} ${tr('register.connected', null, '连接正常')}` : tr('register.notConfigured', null, '未配置'));
+  setText('status-updated', new Date().toLocaleString(undefined, { hour12:false }));
+}
+
+function clientAuthHeader(data) {
+  return data.api_key_required ? ' \\\n  -H "Authorization: Bearer <app.api_key>"' : '';
+}
+
+function renderClientSamples(data) {
+  const baseUrl = data.base_url || `${location.origin}/v1`;
+  const modelsUrl = `${baseUrl.replace(/\/$/, '')}/models`;
+  const apiKey = data.api_key_required ? '<app.api_key>' : 'grok2api';
+  $('client-curl').textContent = `curl ${modelsUrl}${clientAuthHeader(data)}`;
+  $('client-sdk').textContent = [
+    'from openai import OpenAI',
+    `client = OpenAI(base_url="${baseUrl}", api_key="${apiKey}")`,
+    'client.chat.completions.create(',
+    '    model="<model_id>",',
+    '    messages=[{"role": "user", "content": "ping"}],',
+    ')',
+  ].join('\n');
+}
+
+function renderClientModels(data) {
+  const models = Array.isArray(data.models?.items) ? data.models.items : [];
+  const mount = $('client-models');
+  if (!models.length) {
+    mount.innerHTML = `<span class="badge badge-muted">${escapeHtml(tr('register.noModels', null, '暂无可用模型'))}</span>`;
+    return;
+  }
+  mount.innerHTML = models.map((model) => `<span class="badge badge-muted">${escapeHtml(model.id)}</span>`).join('');
+}
+
+async function loadClientStatus() {
+  const box = $('client-status');
+  box.innerHTML = row(tr('register.loading', null, '加载中'), '...');
+  try {
+    const data = await api('/register/client', { cache:'no-store' });
+    const checks = data.checks || {};
+    const readyBadge = data.ready
+      ? badge(tr('register.ready', null, '可调用'), 'badge-ok')
+      : badge(tr('register.notReady', null, '未就绪'), 'badge-warn');
+    const apiKeyState = data.api_key_required
+      ? `${badge(tr('register.configured', null, '已配置'), 'badge-ok')} ${escapeHtml((data.api_keys || []).join(', '))}`
+      : badge(tr('register.optional', null, '未配置，当前不鉴权'), 'badge-muted');
+    box.innerHTML = [
+      row(tr('register.clientReady', null, '调用状态'), readyBadge),
+      row('Base URL', escapeHtml(data.base_url || '-')),
+      row('API Key', apiKeyState),
+      row(tr('register.manageableAccounts', null, '可用账号'), escapeHtml(String(data.accounts?.manageable || 0))),
+      row(tr('register.availableModels', null, '可用模型'), escapeHtml(String(data.models?.count || 0))),
+      row(tr('register.accountCheck', null, '账号检查'), checks.has_accounts ? badge('OK', 'badge-ok') : badge(tr('register.noAccounts', null, '无可用账号'), 'badge-warn')),
+      row(tr('register.modelCheck', null, '模型检查'), checks.has_models ? badge('OK', 'badge-ok') : badge(tr('register.noModels', null, '暂无可用模型'), 'badge-warn')),
+    ].join('');
+    renderClientSamples(data);
+    renderClientModels(data);
+  } catch (error) {
+    box.innerHTML = row(tr('register.failed', null, '连接失败'), escapeHtml(error.message));
+  }
+}
+
+async function refreshAll() {
+  await loadStatus();
+  await loadClientStatus();
+}
+
+async function loadStatus() {
+  const box = $('status');
+  box.innerHTML = row(tr('register.loading', null, '加载中'), '...');
+  try {
+    const data = await api('/register/status', { cache: 'no-store' });
+    const proxy = data.proxy || {};
+    const clearance = data.clearance || {};
+    const fs = clearance.flaresolverr || {};
+    const fsState = !fs.configured
+      ? badge(tr('register.notConfigured', null, '未配置'), 'badge-muted')
+      : fs.ok
+        ? badge(tr('register.connected', null, '连接正常'), 'badge-ok')
+        : badge(tr('register.failed', null, '连接失败'), 'badge-warn');
+    box.innerHTML = [
+      row(tr('register.proxyMode', null, '代理模式'), escapeHtml(proxy.mode || 'direct')),
+      row(tr('register.proxyUrl', null, '固定代理'), escapeHtml(proxy.proxy_url || '-')),
+      row(tr('register.proxyPool', null, '代理池数量'), escapeHtml(String(proxy.proxy_pool_size || 0))),
+      row(tr('register.socks', null, 'SOCKS 支持'), badge('socks5://', 'badge-ok')),
+      row(tr('register.clearanceMode', null, 'Clearance 模式'), escapeHtml(clearance.mode || 'none')),
+      row('FlareSolverr', `${fsState}${fs.message ? ` ${escapeHtml(fs.message)}` : ''}`),
+      row('URL', escapeHtml(clearance.flaresolverr_url || '-')),
+      ...mailStatusRows(data.mail || {}),
+    ].join('');
+    updateOverview(data);
+    applyMailConfig(data.mail || {});
+  } catch (error) {
+    box.innerHTML = row(tr('register.failed', null, '连接失败'), escapeHtml(error.message));
+    showToast(tr('register.statusFailed', { message: error.message }, `状态加载失败: ${error.message}`), 'error');
+  }
+}
+
+async function saveMailConfig() {
+  const btn = $('btn-save-mail');
+  btn.disabled = true;
+  try {
+    const payload = {
+      request_timeout: Number($('mail-request-timeout').value || 30),
+      wait_timeout: Number($('mail-wait-timeout').value || 30),
+      wait_interval: 2,
+      providers: mailProviders.map((provider, index) => {
+        const original = originalMailProviders[index] || {};
+        const merged = { ...provider };
+        ['admin_password', 'api_key', 'token', 'cf_inbox_jwt', 'ddg_token'].forEach((key) => {
+          if (isMaskedSecret(merged[key])) {
+            delete merged[key];
+            if (original[key]) merged[`${key}_unchanged`] = true;
+          }
+        });
+        return merged;
+      }),
+    };
+    await api('/register/mail', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify(payload),
+    });
+    showToast(tr('register.mailSaveSuccess', null, '邮箱配置已保存'), 'success');
+    await loadStatus();
+  } catch (error) {
+    showToast(tr('register.mailSaveFailed', { message:error.message }, `邮箱配置保存失败: ${error.message}`), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doImport() {
+  const tokens = parseTokens($('tokens').value);
+  if (!tokens.length) {
+    showToast(tr('register.noTokens', null, '请先粘贴 token'), 'error');
+    return;
+  }
+  const btn = $('btn-import');
+  btn.disabled = true;
+  try {
+    const data = await api('/tokens/add', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({
+        pool:$('pool').value,
+        tokens,
+        tags:['manual-import'],
+      }),
+    });
+    $('result').classList.add('visible');
+    $('result').innerHTML = [
+      `${escapeHtml(tr('register.imported', null, '新增'))}: ${escapeHtml(data.count || 0)}`,
+      `${escapeHtml(tr('register.skipped', null, '跳过重复'))}: ${escapeHtml(data.skipped || 0)}`,
+      `${escapeHtml(tr('register.synced', null, '同步刷新'))}: ${escapeHtml(data.synced ? 'yes' : 'background')}`,
+    ].join('<br>');
+    showToast(tr('register.importSuccess', null, '导入完成'), 'success');
+    await loadClientStatus();
+  } catch (error) {
+    showToast(tr('register.importFailed', { message:error.message }, `导入失败: ${error.message}`), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+(async () => {
+  await renderAdminHeader?.();
+  await renderSiteFooter?.();
+  await waitI18n().catch(() => {});
+  I18n?.apply(document);
+
+  const key = await adminKey.get();
+  if (!key || !await verifyKey(ADMIN_API + '/verify', key).catch(() => false)) {
+    location.href = '/admin/login';
+    return;
+  }
+
+  $('btn-import').addEventListener('click', doImport);
+  $('btn-clear').addEventListener('click', () => {
+    $('tokens').value = '';
+    $('result').classList.remove('visible');
+  });
+  $('btn-refresh').addEventListener('click', refreshAll);
+  $('btn-refresh-top').addEventListener('click', refreshAll);
+  $('btn-save-mail').addEventListener('click', saveMailConfig);
+  $('btn-add-cf-temp').addEventListener('click', () => {
+    mailProviders.push(defaultProvider('cloudflare_temp_email'));
+    renderMailProviders();
+  });
+  $('btn-add-cloudmail').addEventListener('click', () => {
+    mailProviders.push(defaultProvider('cloudmail_gen'));
+    renderMailProviders();
+  });
+  await refreshAll();
+})();
+</script>
+</body>
+</html>

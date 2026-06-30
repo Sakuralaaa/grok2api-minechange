@@ -557,7 +557,7 @@ const SCHEMA_DEF = [
             labelKey: 'config.schema.fields.proxyUrl.label',
             type: 'text',
             wide: true,
-            desc: 'API 流量的出站代理地址，支持 http、https、socks5 协议。',
+            desc: 'API 流量的出站代理地址，支持 http、https、socks5 协议，例如 socks5://proxy:1080。',
             descKey: 'config.schema.fields.proxyUrl.desc',
             showIf: { path: 'proxy.egress.mode', values: ['single_proxy'] },
           },
