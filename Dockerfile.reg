@@ -57,8 +57,6 @@ RUN apk add --no-cache \
     chromium \
     nss \
     nspr \
-    atk \
-    at-spi2-atk \
     cups-libs \
     libdrm \
     libxkbcommon \
