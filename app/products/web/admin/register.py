@@ -326,8 +326,8 @@ async def register_status():
         "capabilities": {
             "token_import": True,
             "cf_mail_config": True,
-            "automated_registration": False,
-            "browser_automation": False,
+            "automated_registration": true,
+            "browser_automation": true,
         },
     }
 

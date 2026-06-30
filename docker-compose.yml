@@ -1,7 +1,13 @@
+# Usage:
+#   docker compose up -d                                # pull base image
+#   IMAGE_SUFFIX=-reg docker compose up -d              # pull reg image (with Chromium)
+#   docker compose -f docker-compose.yml build          # build base locally
+#   docker compose -f docker-compose.reg.yml build      # build reg locally
+
 services:
   grok2api:
-    container_name: grok2api
-    image: ghcr.io/chenyme/grok2api:latest
+    container_name: grok2api${IMAGE_SUFFIX:-}
+    image: ghcr.io/chenyme/grok2api${IMAGE_SUFFIX:-}:latest
     ports:
       - "${HOST_PORT:-8000}:${SERVER_PORT:-8000}"
     environment:
@@ -15,23 +21,13 @@ services:
       ACCOUNT_REDIS_URL: ${ACCOUNT_REDIS_URL:-}
       ACCOUNT_MYSQL_URL: ${ACCOUNT_MYSQL_URL:-}
       ACCOUNT_POSTGRESQL_URL: ${ACCOUNT_POSTGRESQL_URL:-}
-      # Optional FlareSolverr sidecar URL inside this compose network:
-      # set proxy.clearance.flaresolverr_url to http://flaresolverr:8191 in Admin -> Config.
-      # Optional SOCKS egress example:
-      # set proxy.egress.proxy_url to socks5://warp:1080 or socks5://proxy:1080.
-
-      # ACCOUNT_STORAGE: local | redis | mysql | postgresql
-      # ACCOUNT_LOCAL_PATH: SQLite path when ACCOUNT_STORAGE=local
-      # ACCOUNT_REDIS_URL: Redis DSN when ACCOUNT_STORAGE=redis
-      # ACCOUNT_MYSQL_URL: MySQL DSN when ACCOUNT_STORAGE=mysql
-      # ACCOUNT_POSTGRESQL_URL: PostgreSQL DSN when ACCOUNT_STORAGE=postgresql
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     restart: unless-stopped
 
-  # 如果出口 IP 不干净，可取消以下注释使用 Warp 作为 SOCKS 出口代理
-  # 启用后将 proxy.egress.mode 设为 single_proxy，并将 proxy.egress.proxy_url 设为 socks5://warp:1080
+  # If your egress IP is dirty, uncomment to use Warp as SOCKS egress proxy.
+  # Set proxy.egress.mode = single_proxy and proxy.egress.proxy_url = socks5://warp:1080
   # warp:
   #   container_name: warp
   #   image: caomingjun/warp:latest
@@ -43,7 +39,7 @@ services:
   #   cap_add:
   #     - NET_ADMIN
 
-  # Optional FlareSolverr sidecar for Cloudflare clearance checks.
+  # Optional FlareSolverr sidecar for Cloudflare clearance.
   # In Admin -> Config, set:
   #   proxy.clearance.mode = flaresolverr
   #   proxy.clearance.flaresolverr_url = http://flaresolverr:8191
