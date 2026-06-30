@@ -220,6 +220,20 @@
       gap:6px;
       margin-top:8px;
     }
+    .automation-log {
+      min-height:120px;
+      max-height:260px;
+      overflow:auto;
+      padding:10px 12px;
+      border-top:1px solid #f5f5f5;
+      background:#fbfbfb;
+      color:#333;
+      font-family:'Geist Mono','Courier New',monospace;
+      font-size:11px;
+      line-height:1.6;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+    }
 
     @media (max-width:980px) {
       .reg-stat-grid { grid-template-columns:repeat(2, minmax(0, 1fr)) }
@@ -322,10 +336,46 @@
           </div>
         </div>
         <div id="result" class="reg-result"></div>
-        <div class="reg-note" data-i18n="register.safeNote">此页面只提供合法账户导入和连接状态检查，不包含自动注册、浏览器自动化或验证码绕过功能。</div>
+        <div class="reg-note">Manual import remains available; automatic registration uses the configured mail provider, FlareSolverr, and Playwright browser runtime.</div>
         <div class="reg-actions">
           <button id="btn-clear" class="page-action-btn" type="button" data-i18n="register.clear">清空</button>
           <button id="btn-import" class="page-action-btn page-action-btn-primary" type="button" data-i18n="register.import">导入</button>
+        </div>
+      </section>
+
+      <section class="reg-panel">
+        <div class="reg-panel-title">Automatic Registration</div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="auto-count">Account count</label>
+            <div class="reg-desc">Creates basic-pool accounts through the configured temporary email provider and FlareSolverr.</div>
+          </div>
+          <div class="reg-control-col">
+            <input id="auto-count" class="reg-input" type="number" min="1" max="50" value="1">
+          </div>
+        </div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="auto-tags">Tags</label>
+            <div class="reg-desc">Comma-separated tags attached to generated accounts.</div>
+          </div>
+          <div class="reg-control-col">
+            <input id="auto-tags" class="reg-input" type="text" value="auto-register">
+          </div>
+        </div>
+        <div class="reg-row">
+          <div class="reg-label-col">
+            <label class="reg-label" for="auto-headless">Headless browser</label>
+            <div class="reg-desc">Disable only when debugging on a machine with a visible browser session.</div>
+          </div>
+          <div class="reg-control-col">
+            <label class="provider-toggle"><input id="auto-headless" type="checkbox" checked> enabled</label>
+          </div>
+        </div>
+        <div id="auto-log" class="automation-log">Idle</div>
+        <div class="reg-actions">
+          <button id="btn-auto-stop" class="page-action-btn" type="button" disabled>Stop</button>
+          <button id="btn-auto-start" class="page-action-btn page-action-btn-primary" type="button">Start</button>
         </div>
       </section>
 
@@ -778,6 +828,79 @@ async function doImport() {
   }
 }
 
+let autoEvents = null;
+
+function autoLog(line) {
+  const box = $('auto-log');
+  if (!box) return;
+  if (box.textContent === 'Idle') box.textContent = '';
+  box.textContent += `${line}\n`;
+  box.scrollTop = box.scrollHeight;
+}
+
+async function startAutoRegistration() {
+  const btn = $('btn-auto-start');
+  const stopBtn = $('btn-auto-stop');
+  btn.disabled = true;
+  stopBtn.disabled = false;
+  $('auto-log').textContent = '';
+  try {
+    const count = Math.max(1, Math.min(50, Number($('auto-count').value || 1)));
+    const tags = splitLines($('auto-tags').value || 'auto-register');
+    await api('/register/automation/start', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({
+        count,
+        pool:'basic',
+        tags: tags.length ? tags : ['auto-register'],
+        headless:$('auto-headless').checked,
+      }),
+    });
+    autoLog(`started count=${count}`);
+    const key = await adminKey.get();
+    autoEvents?.close();
+    autoEvents = new EventSource(`${ADMIN_API}/register/automation/progress?app_key=${encodeURIComponent(key)}`);
+    autoEvents.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const data = payload.data || {};
+        autoLog(`[${payload.kind}] ${data.step || ''} ${data.message || data.error || data.reason || ''}`.trim());
+        if (payload.kind === 'batch_done' || payload.kind === 'batch_stop') {
+          autoEvents.close();
+          btn.disabled = false;
+          stopBtn.disabled = true;
+          loadClientStatus().catch(() => {});
+        }
+      } catch {
+        autoLog(event.data);
+      }
+    };
+    autoEvents.onerror = () => {
+      autoLog('progress stream disconnected');
+      autoEvents?.close();
+      btn.disabled = false;
+      stopBtn.disabled = true;
+    };
+  } catch (error) {
+    autoLog(`failed: ${error.message}`);
+    showToast(`Automatic registration failed: ${error.message}`, 'error');
+    btn.disabled = false;
+    stopBtn.disabled = true;
+  }
+}
+
+async function stopAutoRegistration() {
+  const stopBtn = $('btn-auto-stop');
+  stopBtn.disabled = true;
+  try {
+    await api('/register/automation/stop', { method:'POST' });
+    autoLog('stop requested');
+  } catch (error) {
+    autoLog(`stop failed: ${error.message}`);
+  }
+}
+
 (async () => {
   await renderAdminHeader?.();
   await renderSiteFooter?.();
@@ -791,6 +914,8 @@ async function doImport() {
   }
 
   $('btn-import').addEventListener('click', doImport);
+  $('btn-auto-start').addEventListener('click', startAutoRegistration);
+  $('btn-auto-stop').addEventListener('click', stopAutoRegistration);
   $('btn-clear').addEventListener('click', () => {
     $('tokens').value = '';
     $('result').classList.remove('visible');

@@ -198,3 +198,14 @@ asset_upload_concurrency = 10
 asset_list_concurrency   = 50
 # 删除 Asset 并发数（全局，跨所有并发请求共享；也作为管理后台批量清理的 token 级默认值）
 asset_delete_concurrency = 50
+
+# ==================== 自动注册配置 ====================
+[register.browser]
+# 无头模式（不显示浏览器窗口）
+headless = true
+# 浏览器通道（msedge / chromium）
+channel = 'msedge'
+# 代理 URL（不填则复用 proxy.egress.proxy_url）
+proxy_url = ''
+# Chromium 可执行文件路径（Docker.reg 默认用环境变量 REGISTRATION_BROWSER_EXECUTABLE）
+executable_path = ''
