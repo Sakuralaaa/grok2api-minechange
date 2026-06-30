@@ -207,3 +207,5 @@ headless = true
 channel = 'msedge'
 # 代理 URL（不填则复用 proxy.egress.proxy_url）
 proxy_url = ''
+# Chromium 可执行文件路径（Docker.reg 默认用环境变量 REGISTRATION_BROWSER_EXECUTABLE）
+executable_path = ''

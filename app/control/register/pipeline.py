@@ -59,6 +59,7 @@ class RegistrationPipeline:
 
     async def initialize(self) -> None:
         """Initialize email provider from config."""
+        self._email_provider = None
         cfg = get_config()
         mail_cfg = cfg.get("register.mail", {})
         if isinstance(mail_cfg, dict):
@@ -252,10 +253,16 @@ class RegistrationPipeline:
             try:
                 from app.control.account.backends.factory import create_repository
                 repo = create_repository()
-                await repo.initialize()
-                await repo.upsert_accounts([
-                    AccountUpsert(token=token, pool=opts.pool, tags=opts.tags)
-                ])
+                try:
+                    await repo.initialize()
+                    await repo.upsert_accounts([
+                        AccountUpsert(token=token, pool=opts.pool, tags=opts.tags)
+                    ])
+                finally:
+                    await repo.close()
+                from app.dataplane.account import get_account_directory
+                directory = await get_account_directory()
+                await directory.sync_if_changed()
                 step_results["import"] = True
             except Exception as exc:
                 step_results["import"] = False

@@ -12,7 +12,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -32,6 +31,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Normalize image name
+        shell: bash
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Log in to Container Registry
         if: github.event_name != "pull_request"
         uses: docker/login-action@v3
@@ -47,7 +50,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref_type == "branch" }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'branch' }}
             type=sha,prefix=sha-
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -59,7 +62,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest-reg,enable=${{ github.ref_type == "branch" }}
+            type=raw,value=latest-reg,enable=${{ github.ref_type == 'branch' }}
             type=sha,prefix=sha-,suffix=-reg
             type=ref,event=tag,suffix=-reg
             type=semver,pattern={{version}},suffix=-reg

@@ -1,13 +1,12 @@
 # Usage:
-#   docker compose up -d                                # pull base image
-#   IMAGE_SUFFIX=-reg docker compose up -d              # pull reg image (with Chromium)
-#   docker compose -f docker-compose.yml build          # build base locally
-#   docker compose -f docker-compose.reg.yml build      # build reg locally
+#   docker compose up -d                                      # pull :latest
+#   IMAGE_SUFFIX=-reg docker compose up -d                    # pull :latest-reg
+#   IMAGE_REPOSITORY=ghcr.io/sakuralaaa/grok2api-minechange docker compose up -d
 
 services:
   grok2api:
     container_name: grok2api${IMAGE_SUFFIX:-}
-    image: ghcr.io/chenyme/grok2api${IMAGE_SUFFIX:-}:latest
+    image: ${IMAGE_REPOSITORY:-ghcr.io/sakuralaaa/grok2api-minechange}:latest${IMAGE_SUFFIX:-}
     ports:
       - "${HOST_PORT:-8000}:${SERVER_PORT:-8000}"
     environment:

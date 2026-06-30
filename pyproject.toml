@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "grok2api"
 version = "2.0.4.rc4"
 description = "Grok2API rebuilt with FastAPI, fully aligned with the latest web call format. Supports streaming and non-streaming chat, image generation/editing, deep thinking, token pool concurrency, and automatic load balancing."
@@ -26,8 +26,6 @@ dependencies = [
     "tiktoken>=0.8.0",
     "tomli-w>=1.2.0",
 ]
-
-[dependency-groups]
 
 [project.optional-dependencies]
 registration = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -87,11 +88,17 @@ class BrowserManager:
         launch_options: dict[str, Any] = {
             "headless": headless,
         }
+        executable_path = (
+            os.getenv("REGISTRATION_BROWSER_EXECUTABLE", "").strip()
+            or cfg.get_str("register.browser.executable_path", "").strip()
+        )
+        if executable_path:
+            launch_options["executable_path"] = executable_path
         if proxy_url:
             launch_options["proxy"] = {"server": proxy_url}
 
         # Channel: prefer "msedge" on Windows if available, otherwise default chromium
-        if os.name == "nt":
+        if os.name == "nt" and "executable_path" not in launch_options:
             # Try msedge first (many users have it), fall back to bundled chromium
             launch_options["channel"] = cfg.get_str("register.browser.channel", "msedge")
 
@@ -123,7 +130,7 @@ class BrowserManager:
             "browser manager started: headless={} proxy={} channel={}",
             headless,
             bool(proxy_url),
-            launch_options.get("channel", "chromium"),
+            launch_options.get("channel") or launch_options.get("executable_path") or "chromium",
         )
 
     async def stop(self) -> None:
@@ -159,7 +166,9 @@ class BrowserManager:
         """Load cookies from a file into the current context."""
         if not self._context:
             return
-        await self._context.add_cookies(list(Path(path)))
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        cookies = data.get("cookies", data) if isinstance(data, dict) else data
+        await self._context.add_cookies([self._normalize_cookie(cookie) for cookie in cookies])
 
     async def inject_flaresolverr_cookies(self, cookies: list[dict[str, Any]]) -> None:
         """Inject cookies obtained from FlareSolverr into the browser context."""
@@ -168,10 +177,21 @@ class BrowserManager:
             return
         for c in cookies:
             try:
-                await self._context.add_cookies([c])
+                await self._context.add_cookies([self._normalize_cookie(c)])
             except Exception as exc:
                 logger.debug("cookie inject skipped: {}", exc)
         logger.info("injected {} FlareSolverr cookies", len(cookies))
+
+    def _normalize_cookie(self, cookie: dict[str, Any]) -> dict[str, Any]:
+        """Keep only Playwright-supported cookie fields."""
+        allowed = {
+            "name", "value", "url", "domain", "path", "expires",
+            "httpOnly", "secure", "sameSite",
+        }
+        normalized = {k: v for k, v in cookie.items() if k in allowed}
+        if "sameSite" in normalized and normalized["sameSite"] not in {"Strict", "Lax", "None"}:
+            normalized.pop("sameSite", None)
+        return normalized
 
 """
 This module provides a singleton BrowserManager for the registration pipeline.
