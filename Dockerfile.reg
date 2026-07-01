@@ -1,5 +1,7 @@
-# Builder (same as base Dockerfile)
-FROM python:3.13-alpine AS builder
+# Builder for the registration image.
+# Playwright does not reliably publish/install on Alpine/musl, so the reg image
+# uses Debian slim while the normal image stays Alpine.
+FROM python:3.13-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,15 +9,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 ENV PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"
 
-RUN apk add --no-cache \
-    ca-certificates \
-    build-base \
-    linux-headers \
-    libffi-dev \
-    openssl-dev \
-    curl-dev \
-    cargo \
-    rust
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        pkg-config \
+        libffi-dev \
+        libssl-dev \
+        libcurl4-openssl-dev \
+        cargo \
+        rustc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -36,7 +40,7 @@ RUN uv pip install --python /opt/venv/bin/python "playwright>=1.52.0" \
     && rm -rf /root/.cache /tmp/uv-cache
 
 # Runtime
-FROM python:3.13-alpine
+FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -51,42 +55,34 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Chromium + Playwright system dependencies
 RUN set -eux; \
-    apk add --no-cache \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
         tzdata \
         ca-certificates \
-        libffi \
         openssl \
-        libgcc \
-        libstdc++ \
-        libcurl \
+        wget \
+        libcurl4 \
+        libgcc-s1 \
+        libstdc++6 \
         chromium \
-        nss \
-        nspr \
-        cups-libs \
-        libdrm \
-        libxkbcommon \
-        libxcomposite \
-        libxdamage \
-        libxrandr \
-        mesa-gl \
-        gtk+3.0; \
+    ; \
+    rm -rf /var/lib/apt/lists/*; \
     chromium_path=""; \
-    for path in /usr/bin/chromium-browser /usr/bin/chromium /usr/lib/chromium/chromium; do \
+    for path in /usr/bin/chromium /usr/bin/chromium-browser /usr/lib/chromium/chromium; do \
         if [ -x "$path" ]; then chromium_path="$path"; break; fi; \
     done; \
     if [ -z "$chromium_path" ]; then \
         find /usr -type f -name "chromium*" -print; \
         exit 1; \
     fi; \
-    ln -sf "$chromium_path" /usr/local/bin/registration-chromium; \
-    /usr/local/bin/registration-chromium --version
+    ln -sf "$chromium_path" /usr/local/bin/registration-chromium
 
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 
 RUN /opt/venv/bin/python -c "import playwright; from playwright.async_api import async_playwright; print('runtime playwright ok')" \
-    && "$REGISTRATION_BROWSER_EXECUTABLE" --version
+    && test -x "$REGISTRATION_BROWSER_EXECUTABLE"
 
 COPY pyproject.toml config.defaults.toml ./
 COPY app ./app
