@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from app.platform.logging.logger import logger
@@ -14,9 +15,102 @@ from app.dataplane.register.automation.turnstile import (
     create_flaresolverr_session,
 )
 
-_SIGNUP_URL = "https://accounts.x.ai/signup"
+_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com&return_to=%2F"
+_GROK_SIGNUP_URL = "https://grok.com/i/flow/signup"
 _GROK_URL = "https://grok.com"
 _MAX_RETRIES_TURNSTILE = 2
+_HOME_SIGNUP_BUTTON = re.compile(r"^(sign up|register|注册|创建账户|创建账号)$", re.I)
+_EMAIL_SIGNUP_BUTTON = re.compile(
+    r"(email|e-mail|邮箱|邮件).*(sign up|register|注册|continue|继续|use|使用)"
+    r"|"
+    r"(sign up|register|注册|continue|继续|use|使用).*(email|e-mail|邮箱|邮件)",
+    re.I,
+)
+_SUBMIT_BUTTON = re.compile(
+    r"^(sign up|register|continue|next|create account|注册|继续|下一步|创建账户|创建账号|验证|提交)$",
+    re.I,
+)
+_EMAIL_INPUT_SELECTORS = [
+    "input[type='email']",
+    "input[name='email' i]",
+    "input#email",
+    "input[id*='email' i]",
+    "input[autocomplete='email']",
+    "input[inputmode='email']",
+    "input[placeholder*='email' i]",
+    "input[placeholder*='邮箱']",
+    "input[aria-label*='email' i]",
+    "input[aria-label*='邮箱']",
+]
+
+
+async def _click_named_button(page: Any, pattern: re.Pattern[str], *, timeout: int = 2500) -> bool:
+    """Click the first visible button/link matching a localized label."""
+    for role in ("button", "link"):
+        locator = page.get_by_role(role, name=pattern).first
+        try:
+            await locator.wait_for(state="visible", timeout=timeout)
+            await locator.click()
+            await page.wait_for_timeout(1200)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def _first_visible_input(page: Any, selectors: list[str]) -> Any | None:
+    """Return the first visible input matching any selector."""
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+            count = await locator.count()
+            for index in range(min(count, 5)):
+                item = locator.nth(index)
+                if await item.is_visible():
+                    return item
+        except Exception:
+            continue
+    return None
+
+
+async def _page_mentions_email_signup(page: Any) -> bool:
+    """Best-effort guard so generic textbox fallback does not fill the Grok chat box."""
+    try:
+        if "accounts.x.ai" in page.url.lower():
+            return True
+        body_text = (await page.inner_text("body")).lower()
+        return any(text in body_text for text in ("email", "e-mail", "邮箱", "邮件"))
+    except Exception:
+        return False
+
+
+async def _find_email_input(page: Any, *, allow_generic_textbox: bool = False) -> Any | None:
+    """Find the visible email textbox on the current signup step."""
+    email_input = await _first_visible_input(page, _EMAIL_INPUT_SELECTORS)
+    if email_input:
+        return email_input
+
+    if allow_generic_textbox and await _page_mentions_email_signup(page):
+        try:
+            locator = page.get_by_role("textbox").first
+            await locator.wait_for(state="visible", timeout=2500)
+            return locator
+        except Exception:
+            return None
+    return None
+
+
+async def _ensure_email_signup_form(page: Any) -> bool:
+    """Navigate the current auth UI to the email-signup form."""
+    for _ in range(4):
+        if await _find_email_input(page, allow_generic_textbox=True):
+            return True
+        if await _click_named_button(page, _EMAIL_SIGNUP_BUTTON):
+            continue
+        if await _click_named_button(page, _HOME_SIGNUP_BUTTON):
+            continue
+        break
+    return bool(await _find_email_input(page, allow_generic_textbox=True))
 
 
 async def step_navigate_signup(browser: BrowserManager) -> bool:
@@ -25,6 +119,10 @@ async def step_navigate_signup(browser: BrowserManager) -> bool:
         page = browser.page
         await page.goto(_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(2000)
+        if "accounts.x.ai" not in page.url.lower():
+            await page.goto(_GROK_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(2000)
+        await _ensure_email_signup_form(page)
         logger.info("registration step: navigated to signup page")
         return True
     except Exception as exc:
@@ -36,30 +134,18 @@ async def step_fill_email(browser: BrowserManager, email: str) -> bool:
     """Fill the email input field on the signup form."""
     try:
         page = browser.page
-        selectors = [
-            "input[type='email']",
-            "input[name='email']",
-            "input#email",
-            "input[placeholder*='email']",
-            "input[autocomplete='email']",
-        ]
-        email_input = None
-        for sel in selectors:
-            el = await page.query_selector(sel)
-            if el:
-                email_input = el
-                break
-
+        await _ensure_email_signup_form(page)
+        email_input = await _find_email_input(page, allow_generic_textbox=True)
         if not email_input:
-            inputs = await page.query_selector_all("input:visible")
-            if inputs:
-                email_input = inputs[0]
-            else:
-                logger.error("registration step: no email input found")
-                return False
+            logger.error("registration step: no email input found at {} title={}", page.url, await page.title())
+            return False
 
         await email_input.click()
         await email_input.fill(email)
+        value = await email_input.evaluate("(el) => el.value || el.textContent || ''")
+        if value.strip() != email:
+            logger.error("registration step: email input value mismatch at {}", page.url)
+            return False
         logger.info("registration step: filled email: {}", email)
         return True
     except Exception as exc:
@@ -122,11 +208,21 @@ async def step_submit_form(browser: BrowserManager) -> bool:
     """Submit the signup form."""
     try:
         page = browser.page
+        if await _click_named_button(page, _SUBMIT_BUTTON):
+            logger.info("registration step: form submitted")
+            return True
+
         selectors = [
             "button[type='submit']",
             "button:has-text('Continue')",
             "button:has-text('Sign Up')",
+            "button:has-text('Register')",
             "button:has-text('Next')",
+            "button:has-text('注册')",
+            "button:has-text('继续')",
+            "button:has-text('下一步')",
+            "button:has-text('验证')",
+            "button:has-text('提交')",
             "input[type='submit']",
             "button[class*='submit']",
             "button[class*='continue']",
@@ -194,7 +290,19 @@ async def step_wait_verification(browser: BrowserManager, timeout: int = 120) ->
     """Wait for the page to transition to a verification-required state."""
     try:
         page = browser.page
-        success_keywords = ["verify", "check your email", "verification sent", "confirm"]
+        success_keywords = [
+            "verify",
+            "verification",
+            "check your email",
+            "verification sent",
+            "confirm",
+            "code",
+            "验证码",
+            "验证",
+            "检查你的邮箱",
+            "检查您的邮箱",
+            "确认",
+        ]
         for _ in range(timeout // 2):
             await page.wait_for_timeout(2000)
             body_text = await page.inner_text("body") if await page.query_selector("body") else ""
