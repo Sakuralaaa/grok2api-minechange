@@ -13,6 +13,12 @@ from urllib.error import HTTPError, URLError
 
 from app.platform.logging.logger import logger
 
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 class CloudflareTempEmailProvider:
     """Email provider using Cloudflare Email Worker (temp-email)."""
@@ -172,7 +178,12 @@ class CloudflareTempEmailProvider:
             url,
             data=body,
             method=method.upper(),
-            headers={"Content-Type": "application/json", **(headers or {})},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": _DEFAULT_USER_AGENT,
+                **(headers or {}),
+            },
         )
         try:
             with urllib_request.urlopen(req, timeout=timeout) as resp:

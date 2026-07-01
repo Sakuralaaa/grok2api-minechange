@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/register", tags=["Admin - Register"])
 _POOL_ID_TO_NAME = {0: "basic", 1: "super", 2: "heavy"}
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 class MailConfigRequest(RootModel[dict[str, Any]]):
@@ -118,7 +123,12 @@ def _request_json(
         url,
         data=body,
         method=method.upper(),
-        headers={"Content-Type": "application/json", **(headers or {})},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _DEFAULT_USER_AGENT,
+            **(headers or {}),
+        },
     )
     with urllib_request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", "replace")
