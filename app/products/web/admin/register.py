@@ -185,7 +185,7 @@ async def _check_cloudflare_temp_email(provider: dict[str, Any], timeout: int) -
     def _check() -> dict[str, Any]:
         return _request_json(
             "GET",
-            f"{api_base}/admin/domains",
+            f"{api_base}/admin/mails?limit=1&offset=0",
             timeout=timeout,
             headers={"x-admin-auth": admin_password},
         )
@@ -193,14 +193,7 @@ async def _check_cloudflare_temp_email(provider: dict[str, Any], timeout: int) -
     try:
         result = await asyncio.to_thread(_check)
         data = result.get("data")
-        domain_count = 0
-        if isinstance(data, list):
-            domain_count = len(data)
-        elif isinstance(data, dict):
-            for key in ("domains", "data", "results"):
-                if isinstance(data.get(key), list):
-                    domain_count = len(data[key])
-                    break
+        domain_count = len(_list_value(provider.get("domain")))
         return {**result, "configured": True, "domain_count": domain_count}
     except HTTPError as exc:
         return {

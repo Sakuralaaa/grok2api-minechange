@@ -22,9 +22,7 @@ class CloudflareTempEmailProvider:
         self._domains: list[str] = config.get("domain", [])
         self._admin_password = str(config.get("admin_password", ""))
         self._enabled = bool(config.get("enable", True))
-        self._headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self._admin_password:
-            self._headers["Authorization"] = f"Bearer {self._admin_password}"
+        self._address_jwts: dict[str, str] = {}
 
     async def check_connectivity(self) -> dict[str, Any]:
         """Check connectivity by hitting the health/info endpoint."""
@@ -32,9 +30,19 @@ class CloudflareTempEmailProvider:
             return {"ok": False, "message": "provider disabled"}
         if not self._api_base:
             return {"ok": False, "message": "api_base not configured"}
+        if not self._admin_password:
+            return {"ok": False, "message": "admin_password not configured"}
         try:
-            result = await self._request("GET", "/health", timeout=10)
-            return {"ok": result.get("ok", False), "message": result.get("data", {}).get("status", "unknown")}
+            result = await self._request(
+                "GET",
+                "/admin/mails?limit=1&offset=0",
+                timeout=10,
+                headers={"x-admin-auth": self._admin_password},
+            )
+            return {
+                "ok": result.get("ok", False),
+                "message": "connected" if result.get("ok") else str(result.get("data", "")),
+            }
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
 
@@ -42,48 +50,76 @@ class CloudflareTempEmailProvider:
         """Create a new temporary email address."""
         chosen_domain = domain or (self._domains[0] if self._domains else "example.com")
         local_part = self._generate_local_part()
-        email = f"{local_part}@{chosen_domain}"
         result = await self._request(
             "POST",
-            "/api/email/create",
-            payload={"email": email, "domain": chosen_domain},
+            "/admin/new_address",
+            payload={
+                "enablePrefix": True,
+                "name": local_part,
+                "domain": chosen_domain,
+            },
             timeout=15,
+            headers={"x-admin-auth": self._admin_password},
         )
         if not result.get("ok"):
             raise RuntimeError(f"create_email failed: {result.get('data', result)}")
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        email = str(data.get("address") or "")
+        jwt = str(data.get("jwt") or "")
+        if not email or not jwt:
+            raise RuntimeError(f"create_email response missing address/jwt: {data}")
+        self._address_jwts[email] = jwt
         logger.info("email provider: created temp email {}", email)
         return email
 
     async def wait_for_verification_link(
         self,
         email: str,
-        sender_pattern: str = "noreply@x.ai",
+        sender_pattern: str = "",
         timeout: float = 120.0,
         interval: float = 2.0,
     ) -> str | None:
         """Poll the inbox for a verification email from sender_pattern."""
+        result = await self.wait_for_verification(email, sender_pattern, timeout, interval)
+        return result.get("link")
+
+    async def wait_for_verification(
+        self,
+        email: str,
+        sender_pattern: str = "",
+        timeout: float = 120.0,
+        interval: float = 2.0,
+    ) -> dict[str, str | None]:
+        """Poll the inbox and extract either a verification link or code."""
+        jwt = self._address_jwts.get(email)
+        if not jwt:
+            raise RuntimeError(f"missing jwt for {email}")
         deadline = asyncio.get_event_loop().time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             try:
                 messages = await self._request(
                     "GET",
-                    f"/api/email/{email}/messages",
+                    "/api/mails?limit=10&offset=0",
                     timeout=10,
+                    headers={"Authorization": f"Bearer {jwt}"},
                 )
-                items = messages.get("data", []) if isinstance(messages, dict) else messages
+                data = messages.get("data") if isinstance(messages, dict) else {}
+                items = data.get("results", []) if isinstance(data, dict) else []
                 for msg in items:
-                    sender = (msg.get("from") or msg.get("sender", "")).lower()
-                    if sender_pattern.lower() in sender:
-                        body = msg.get("body") or msg.get("text") or msg.get("html") or ""
-                        link = self._extract_verification_link(body)
-                        if link:
-                            logger.info("email provider: found verification link for {}", email)
-                            return link
+                    sender = (msg.get("source") or msg.get("from") or msg.get("sender", "")).lower()
+                    if sender_pattern and sender_pattern.lower() not in sender:
+                        continue
+                    body = msg.get("raw") or msg.get("body") or msg.get("text") or msg.get("html") or ""
+                    link = self._extract_verification_link(body)
+                    code = self._extract_verification_code(body)
+                    if link or code:
+                        logger.info("email provider: found verification message for {}", email)
+                        return {"link": link, "code": code}
             except Exception as exc:
                 logger.debug("email provider: poll failed: {}", exc)
             await asyncio.sleep(interval)
-        logger.warning("email provider: verification link not found within {}s for {}", timeout, email)
-        return None
+        logger.warning("email provider: verification message not found within {}s for {}", timeout, email)
+        return {"link": None, "code": None}
 
     async def dispose_email(self, email: str) -> None:
         """Delete the temporary email address."""
@@ -107,12 +143,27 @@ class CloudflareTempEmailProvider:
                 return url
         return urls[0] if urls else None
 
+    def _extract_verification_code(self, body: str) -> str | None:
+        """Extract a 4-8 digit verification code from email body text."""
+        patterns = [
+            r"code is:?\s*(\d{4,8})",
+            r"verification code[:：]?\s*(\d{4,8})",
+            r"<strong>(\d{4,8})</strong>",
+            r"\b(\d{6})\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, body, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
     async def _request(
         self,
         method: str,
         path: str,
         *,
         payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         timeout: int = 15,
     ) -> dict[str, Any]:
         url = f"{self._api_base}{path}"
@@ -121,7 +172,7 @@ class CloudflareTempEmailProvider:
             url,
             data=body,
             method=method.upper(),
-            headers=self._headers,
+            headers={"Content-Type": "application/json", **(headers or {})},
         )
         try:
             with urllib_request.urlopen(req, timeout=timeout) as resp:

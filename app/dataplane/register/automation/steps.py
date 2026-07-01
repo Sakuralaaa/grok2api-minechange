@@ -154,6 +154,42 @@ async def step_submit_form(browser: BrowserManager) -> bool:
         return False
 
 
+async def step_fill_verification_code(browser: BrowserManager, code: str) -> bool:
+    """Fill an email verification code and submit it."""
+    try:
+        page = browser.page
+        selectors = [
+            "input[name='code']",
+            "input[name='verification_code']",
+            "input[autocomplete='one-time-code']",
+            "input[inputmode='numeric']",
+            "input[type='tel']",
+            "input[type='text']",
+        ]
+        code_input = None
+        for sel in selectors:
+            el = await page.query_selector(sel)
+            if el:
+                code_input = el
+                break
+        if not code_input:
+            inputs = await page.query_selector_all("input:visible")
+            code_input = inputs[0] if inputs else None
+        if not code_input:
+            logger.error("registration step: no verification code input found")
+            return False
+
+        await code_input.click()
+        await code_input.fill(code)
+        await page.wait_for_timeout(500)
+        await step_submit_form(browser)
+        logger.info("registration step: verification code submitted")
+        return True
+    except Exception as exc:
+        logger.warning("registration step: verification code submit failed: {}", exc)
+        return False
+
+
 async def step_wait_verification(browser: BrowserManager, timeout: int = 120) -> bool:
     """Wait for the page to transition to a verification-required state."""
     try:

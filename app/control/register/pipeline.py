@@ -216,16 +216,32 @@ class RegistrationPipeline:
                 wait_timeout = float(mail_cfg.get("wait_timeout", 120)) if isinstance(mail_cfg, dict) else 120.0
                 wait_interval = float(mail_cfg.get("wait_interval", 2)) if isinstance(mail_cfg, dict) else 2.0
                 try:
-                    verify_link = await self._email_provider.wait_for_verification_link(
-                        email, timeout=wait_timeout, interval=wait_interval
-                    )
-                    step_results["wait_email"] = bool(verify_link)
+                    if hasattr(self._email_provider, "wait_for_verification"):
+                        verification = await self._email_provider.wait_for_verification(
+                            email, timeout=wait_timeout, interval=wait_interval
+                        )
+                    else:
+                        verification = {
+                            "link": await self._email_provider.wait_for_verification_link(
+                                email, timeout=wait_timeout, interval=wait_interval
+                            ),
+                            "code": None,
+                        }
+                    verify_link = verification.get("link")
+                    verify_code = verification.get("code")
+                    step_results["wait_email"] = bool(verify_link or verify_code)
                     if verify_link:
                         self._progress.emit(PipelineEvent("step", {"step": "verify_link", "message": "Opening verification link..."}))
                         await self._browser.page.goto(verify_link, wait_until="domcontentloaded", timeout=30000)
                         await self._browser.page.wait_for_timeout(3000)
+                    elif verify_code:
+                        self._progress.emit(PipelineEvent("step", {"step": "verify_code", "message": "Submitting verification code..."}))
+                        if not await reg_steps.step_fill_verification_code(self._browser, verify_code):
+                            error = "Verification code submission failed"
+                            self._progress.emit(PipelineEvent("error", {"step": "verify_code", "error": error}))
+                            return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
                     else:
-                        error = "Verification email not received"
+                        error = "Verification email not received or no link/code found"
                         self._progress.emit(PipelineEvent("error", {"step": "wait_email", "error": error}))
                         return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
                 except Exception as exc:

@@ -120,20 +120,19 @@ class PipelineProgress:
 
         # Yield existing events first
         for event in self._events:
-            yield f"data: {json.dumps({'kind': event.kind, 'data': event.data, 'timestamp': event.timestamp})}\\n\\n"
+            yield f"data: {json.dumps({'kind': event.kind, 'data': event.data, 'timestamp': event.timestamp})}\n\n"
 
         # Then stream new events as they arrive
         while True:
             try:
                 event = await asyncio.wait_for(self._event_queue.get(), timeout=30.0)
-                yield f"data: {json.dumps({'kind': event.kind, 'data': event.data, 'timestamp': event.timestamp})}\\n\\n"
+                yield f"data: {json.dumps({'kind': event.kind, 'data': event.data, 'timestamp': event.timestamp})}\n\n"
                 if event.kind == "batch_done" or event.kind == "batch_stop" or event.kind == "stop_requested" and "reason" in event.data:
                     break
             except asyncio.TimeoutError:
                 # Send keepalive
-                yield ": keepalive\\n\\n"
+                yield ": keepalive\n\n"
 
 
 # Re-export for type hints
 # AsyncGenerator imported above
-
