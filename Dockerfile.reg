@@ -25,6 +25,7 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-dev --no-install-project \
     && uv pip install --python /opt/venv/bin/python "playwright>=1.52.0" \
+    && /opt/venv/bin/python -c "import playwright; from playwright.async_api import async_playwright; print('builder playwright ok')" \
     && find /opt/venv -type d \
          \( -name "__pycache__" -o -name "tests" -o -name "test" -o -name "testing" \) \
          -prune -exec rm -rf {} + \
@@ -65,11 +66,15 @@ RUN apk add --no-cache \
     libxdamage \
     libxrandr \
     mesa-gl \
-    gtk+3.0
+    gtk+3.0 \
+    && if [ ! -x /usr/bin/chromium-browser ] && [ -x /usr/bin/chromium ]; then ln -s /usr/bin/chromium /usr/bin/chromium-browser; fi
 
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
+
+RUN /opt/venv/bin/python -c "import playwright; from playwright.async_api import async_playwright; print('runtime playwright ok')" \
+    && test -x "$REGISTRATION_BROWSER_EXECUTABLE"
 
 COPY pyproject.toml config.defaults.toml ./
 COPY app ./app

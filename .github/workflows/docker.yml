@@ -77,8 +77,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
           pull: true
 
       # ── Build reg image (with Chromium + Playwright registration) ──
@@ -91,6 +91,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-reg.outputs.tags }}
           labels: ${{ steps.meta-reg.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=reg
+          cache-to: type=gha,mode=max,scope=reg
           pull: true
