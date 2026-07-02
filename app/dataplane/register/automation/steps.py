@@ -152,6 +152,11 @@ async def _describe_page(page: Any) -> str:
     return f"url={page.url} title={title!r} body={snippet!r}"
 
 
+async def step_describe_page(browser: BrowserManager) -> str:
+    """Expose the current page state for pipeline diagnostics."""
+    return await _describe_page(browser.page)
+
+
 async def step_prepare_signup_clearance(
     *,
     flaresolverr_url: str | None = None,

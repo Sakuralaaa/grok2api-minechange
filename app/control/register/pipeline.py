@@ -233,7 +233,25 @@ class RegistrationPipeline:
 
             # --- Step 8: Wait for verification page ---
             self._progress.emit(PipelineEvent("step", {"step": "wait_verification_page", "message": "Waiting for verification page..."}))
-            await asyncio.sleep(3)
+            verification_page_ready = await reg_steps.step_wait_verification(self._browser, timeout=20)
+            if not verification_page_ready:
+                # Some flows surface Turnstile or validation only after the first submit.
+                self._progress.emit(PipelineEvent("step", {"step": "turnstile_retry", "message": "Verification page not reached, retrying challenge/submit..."}))
+                await reg_steps.step_handle_turnstile(self._browser)
+                if not await reg_steps.step_submit_form(self._browser):
+                    step_results["wait_verification_page"] = False
+                    error = "Verification page not reached after submit retry"
+                    self._progress.emit(PipelineEvent("error", {"step": "wait_verification_page", "error": error}))
+                    return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+                verification_page_ready = await reg_steps.step_wait_verification(self._browser, timeout=15)
+
+            if not verification_page_ready:
+                step_results["wait_verification_page"] = False
+                page_state = await reg_steps.step_describe_page(self._browser)
+                error = f"Verification page not reached after submit; {page_state}"
+                self._progress.emit(PipelineEvent("error", {"step": "wait_verification_page", "error": error}))
+                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+            step_results["wait_verification_page"] = True
 
             # --- Step 9: Poll for verification email ---
             self._progress.emit(PipelineEvent("step", {"step": "wait_email", "message": "Waiting for verification email..."}))
