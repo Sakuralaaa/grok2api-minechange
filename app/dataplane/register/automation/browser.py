@@ -55,6 +55,7 @@ class BrowserManager:
         headless: bool | None = None,
         proxy_url: str | None = None,
         user_data_dir: str | Path | None = None,
+        user_agent: str | None = None,
     ) -> None:
         """Start a Playwright Chromium browser.
 
@@ -64,6 +65,8 @@ class BrowserManager:
             proxy_url: SOCKS/HTTP proxy URL. Falls back to config
                        `proxy.egress.proxy_url`.
             user_data_dir: Persistent context directory for cookies.
+            user_agent: Optional user-agent override, used to align with
+                        a FlareSolverr-issued clearance bundle.
         """
         if self._running:
             logger.warning("browser manager already started, skipping")
@@ -110,7 +113,7 @@ class BrowserManager:
             self._browser = await self._playwright.chromium.launch(**launch_options)
 
         context_options: dict[str, Any] = {
-            "user_agent": cfg.get_str(
+            "user_agent": user_agent or cfg.get_str(
                 "register.browser.user_agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
             ),

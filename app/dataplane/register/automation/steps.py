@@ -12,13 +12,20 @@ from app.platform.errors import UpstreamError
 from app.dataplane.register.automation.browser import BrowserManager
 from app.dataplane.register.automation.turnstile import (
     resolve_turnstile_with_flaresolverr,
-    create_flaresolverr_session,
 )
 
 _SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com&return_to=%2F"
 _GROK_SIGNUP_URL = "https://grok.com/i/flow/signup"
 _GROK_URL = "https://grok.com"
 _MAX_RETRIES_TURNSTILE = 2
+_CF_CHALLENGE_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "verify you are human",
+    "cloudflare",
+    "cf-challenge",
+    "turnstile",
+)
 _HOME_SIGNUP_BUTTON = re.compile(r"^(sign up|register|注册|创建账户|创建账号)$", re.I)
 _EMAIL_SIGNUP_BUTTON = re.compile(
     r"(email|e-mail|邮箱|邮件).*(sign up|register|注册|continue|继续|use|使用)"
@@ -113,17 +120,74 @@ async def _ensure_email_signup_form(page: Any) -> bool:
     return bool(await _find_email_input(page, allow_generic_textbox=True))
 
 
+async def _page_has_cloudflare_gate(page: Any) -> bool:
+    """Detect whether the current page is still blocked by a Cloudflare gate."""
+    try:
+        title = (await page.title()).lower()
+    except Exception:
+        title = ""
+
+    try:
+        body_text = ((await page.inner_text("body")) if await page.query_selector("body") else "").lower()
+    except Exception:
+        body_text = ""
+
+    text = f"{page.url.lower()} {title} {body_text[:4000]}"
+    return any(marker in text for marker in _CF_CHALLENGE_MARKERS)
+
+
+async def step_prepare_signup_clearance(
+    *,
+    flaresolverr_url: str | None = None,
+    proxy_url: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the CF challenge that appears before the email signup page."""
+    cfg = get_config()
+    fs_url = flaresolverr_url or cfg.get_str("proxy.clearance.flaresolverr_url", "")
+    if not fs_url:
+        return {"ok": True, "cookies": [], "user_agent": "", "target_url": _SIGNUP_URL}
+
+    timeout = cfg.get_int("proxy.clearance.timeout_sec", 60)
+    errors: list[str] = []
+    for target_url in (_SIGNUP_URL, _GROK_SIGNUP_URL):
+        result = await resolve_turnstile_with_flaresolverr(
+            target_url,
+            flaresolverr_url=fs_url,
+            proxy_url=proxy_url,
+            timeout=timeout,
+        )
+        if result.get("ok"):
+            result["target_url"] = target_url
+            logger.info("registration step: pre-signup CF clearance solved for {}", target_url)
+            return result
+        errors.append(f"{target_url}: {result.get('error', 'unknown error')}")
+
+    error = "; ".join(errors) if errors else "unknown error"
+    logger.warning("registration step: pre-signup CF clearance failed: {}", error)
+    return {"ok": False, "error": error, "target_url": _SIGNUP_URL}
+
+
 async def step_navigate_signup(browser: BrowserManager) -> bool:
     """Navigate to the Grok / x.ai signup page."""
     try:
         page = browser.page
         await page.goto(_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(2000)
+        if await _page_has_cloudflare_gate(page):
+            logger.info("registration step: CF gate detected before email signup page, invoking FlareSolverr")
+            if not await step_handle_turnstile(browser, current_url=page.url or _SIGNUP_URL, force=True):
+                return False
         if "accounts.x.ai" not in page.url.lower():
             await page.goto(_GROK_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(2000)
-        await _ensure_email_signup_form(page)
-        logger.info("registration step: navigated to signup page")
+            if await _page_has_cloudflare_gate(page):
+                logger.info("registration step: CF gate detected on Grok signup page, invoking FlareSolverr")
+                if not await step_handle_turnstile(browser, current_url=page.url or _GROK_SIGNUP_URL, force=True):
+                    return False
+        if not await _ensure_email_signup_form(page):
+            logger.warning("registration step: email signup form not available after navigation")
+            return False
+        logger.info("registration step: navigated to email signup page")
         return True
     except Exception as exc:
         logger.warning("registration step: navigate signup failed: {}", exc)
@@ -157,8 +221,10 @@ async def step_handle_turnstile(
     browser: BrowserManager,
     *,
     flaresolverr_url: str | None = None,
+    current_url: str | None = None,
+    force: bool = False,
 ) -> bool:
-    """Detect and resolve Cloudflare Turnstile via FlareSolverr."""
+    """Detect and resolve Cloudflare Turnstile / CF gates via FlareSolverr."""
     cfg = get_config()
     fs_url = flaresolverr_url or cfg.get_str("proxy.clearance.flaresolverr_url", "")
     if not fs_url:
@@ -168,15 +234,16 @@ async def step_handle_turnstile(
     page = browser.page
     try:
         turnstile_present = await page.query_selector("iframe[src*='turnstile'], div[class*='turnstile']")
-        if not turnstile_present:
-            logger.info("registration step: no Turnstile detected, skipping")
+        challenge_present = await _page_has_cloudflare_gate(page)
+        if not force and not turnstile_present and not challenge_present:
+            logger.info("registration step: no Turnstile or CF gate detected, skipping")
             return True
 
-        logger.info("registration step: Turnstile detected, resolving via FlareSolverr")
-        current_url = page.url
+        target_url = current_url or page.url or _SIGNUP_URL
+        logger.info("registration step: CF challenge detected at {}, resolving via FlareSolverr", target_url)
         for attempt in range(1, _MAX_RETRIES_TURNSTILE + 1):
             result = await resolve_turnstile_with_flaresolverr(
-                current_url or _SIGNUP_URL,
+                target_url,
                 flaresolverr_url=fs_url,
                 proxy_url=cfg.get_str("proxy.egress.proxy_url", "") or None,
                 timeout=cfg.get_int("proxy.clearance.timeout_sec", 60),
@@ -187,17 +254,19 @@ async def step_handle_turnstile(
                     await browser.inject_flaresolverr_cookies(cookies)
                 await page.reload(wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
-                logger.info("registration step: Turnstile resolved and cookies injected")
-                return True
+                if not await _page_has_cloudflare_gate(page):
+                    logger.info("registration step: CF challenge resolved and cookies injected")
+                    return True
+                logger.warning("registration step: CF challenge still present after reload, retrying")
             else:
                 logger.warning(
-                    "registration step: Turnstile resolve attempt {}/{} failed: {}",
+                    "registration step: CF resolve attempt {}/{} failed: {}",
                     attempt, _MAX_RETRIES_TURNSTILE, result.get("error"),
                 )
                 if attempt < _MAX_RETRIES_TURNSTILE:
                     await asyncio.sleep(3)
 
-        logger.error("registration step: Turnstile resolution failed after {} attempts", _MAX_RETRIES_TURNSTILE)
+        logger.error("registration step: CF challenge resolution failed after {} attempts", _MAX_RETRIES_TURNSTILE)
         return False
     except Exception as exc:
         logger.warning("registration step: Turnstile handling failed: {}", exc)

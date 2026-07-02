@@ -1,7 +1,8 @@
 """Registration pipeline orchestration.
 
-Chains: generate email -> Playwright signup -> FlareSolverr Turnstile ->
-wait for verification email -> extract token -> post-process (ToS/NSFW) -> import.
+Chains: FlareSolverr clearance -> Playwright signup -> generate email ->
+submit registration -> wait for verification email -> extract token ->
+post-process (ToS/NSFW) -> import.
 """
 
 from __future__ import annotations
@@ -132,11 +133,58 @@ class RegistrationPipeline:
         email: str | None = None
         token: str | None = None
         error: str | None = None
+        clearance_bundle: dict[str, Any] | None = None
 
         self._progress.emit(PipelineEvent("step", {"step": "init", "message": f"Starting registration {index}/{total}", "index": index}))
 
         try:
-            # --- Step 1: Create email ---
+            cfg = get_config()
+            proxy_url = cfg.get_str("proxy.egress.proxy_url", "") or None
+            fs_url = cfg.get_str("proxy.clearance.flaresolverr_url", "") or None
+
+            # --- Step 1: Clear the CF gate before opening the email signup page ---
+            self._progress.emit(PipelineEvent("step", {"step": "clearance", "message": "Resolving Cloudflare challenge before signup..."}))
+            clearance_bundle = await reg_steps.step_prepare_signup_clearance(
+                flaresolverr_url=fs_url,
+                proxy_url=proxy_url,
+            )
+            if not clearance_bundle.get("ok"):
+                step_results["clearance"] = False
+                error = f"Cloudflare clearance failed: {clearance_bundle.get('error', 'unknown error')}"
+                self._progress.emit(PipelineEvent("error", {"step": "clearance", "error": error}))
+                return {"success": False, "email": None, "token": None, "error": error, "steps": step_results}
+            step_results["clearance"] = True
+
+            # --- Step 2: Start browser ---
+            self._progress.emit(PipelineEvent("step", {"step": "start_browser", "message": "Starting browser..."}))
+            try:
+                self._browser = await get_browser_manager()
+                if not self._browser.is_running:
+                    await self._browser.start(
+                        headless=opts.headless,
+                        proxy_url=proxy_url,
+                        user_agent=(clearance_bundle or {}).get("user_agent") or None,
+                    )
+                cookies = (clearance_bundle or {}).get("cookies", [])
+                if cookies:
+                    await self._browser.inject_flaresolverr_cookies(cookies)
+                step_results["start_browser"] = True
+            except Exception as exc:
+                step_results["start_browser"] = False
+                error = f"Browser start failed: {exc}"
+                self._progress.emit(PipelineEvent("error", {"step": "start_browser", "error": error}))
+                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+
+            # --- Step 3: Navigate to signup ---
+            self._progress.emit(PipelineEvent("step", {"step": "navigate", "message": "Navigating to email signup page..."}))
+            if not await reg_steps.step_navigate_signup(self._browser):
+                step_results["navigate"] = False
+                error = "Navigation to email signup page failed"
+                self._progress.emit(PipelineEvent("error", {"step": "navigate", "error": error}))
+                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+            step_results["navigate"] = True
+
+            # --- Step 4: Create email only after the CF gate is cleared ---
             self._progress.emit(PipelineEvent("step", {"step": "create_email", "message": "Creating temporary email..."}))
             if self._email_provider:
                 try:
@@ -153,31 +201,7 @@ class RegistrationPipeline:
                 self._progress.emit(PipelineEvent("error", {"step": "create_email", "error": error}))
                 return {"success": False, "email": None, "token": None, "error": error, "steps": step_results}
 
-            # --- Step 2: Start browser ---
-            self._progress.emit(PipelineEvent("step", {"step": "start_browser", "message": "Starting browser..."}))
-            try:
-                self._browser = await get_browser_manager()
-                if not self._browser.is_running:
-                    cfg = get_config()
-                    proxy_url = cfg.get_str("proxy.egress.proxy_url", "") or None
-                    await self._browser.start(headless=opts.headless, proxy_url=proxy_url)
-                step_results["start_browser"] = True
-            except Exception as exc:
-                step_results["start_browser"] = False
-                error = f"Browser start failed: {exc}"
-                self._progress.emit(PipelineEvent("error", {"step": "start_browser", "error": error}))
-                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
-
-            # --- Step 3: Navigate to signup ---
-            self._progress.emit(PipelineEvent("step", {"step": "navigate", "message": "Navigating to signup page..."}))
-            if not await reg_steps.step_navigate_signup(self._browser):
-                step_results["navigate"] = False
-                error = "Navigation to signup page failed"
-                self._progress.emit(PipelineEvent("error", {"step": "navigate", "error": error}))
-                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
-            step_results["navigate"] = True
-
-            # --- Step 4: Fill email ---
+            # --- Step 5: Fill email ---
             self._progress.emit(PipelineEvent("step", {"step": "fill_email", "message": f"Filling email: {email}..."}))
             if not await reg_steps.step_fill_email(self._browser, email):
                 step_results["fill_email"] = False
@@ -186,7 +210,7 @@ class RegistrationPipeline:
                 return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
             step_results["fill_email"] = True
 
-            # --- Step 5: Handle Turnstile via FlareSolverr ---
+            # --- Step 6: Handle any inline Turnstile challenge via FlareSolverr ---
             self._progress.emit(PipelineEvent("step", {"step": "turnstile", "message": "Resolving Turnstile challenge..."}))
             if not await reg_steps.step_handle_turnstile(self._browser):
                 step_results["turnstile"] = False
@@ -195,7 +219,7 @@ class RegistrationPipeline:
                 return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
             step_results["turnstile"] = True
 
-            # --- Step 6: Submit form ---
+            # --- Step 7: Submit form ---
             self._progress.emit(PipelineEvent("step", {"step": "submit", "message": "Submitting registration form..."}))
             if not await reg_steps.step_submit_form(self._browser):
                 step_results["submit"] = False
@@ -204,14 +228,13 @@ class RegistrationPipeline:
                 return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
             step_results["submit"] = True
 
-            # --- Step 7: Wait for verification page ---
+            # --- Step 8: Wait for verification page ---
             self._progress.emit(PipelineEvent("step", {"step": "wait_verification_page", "message": "Waiting for verification page..."}))
             await asyncio.sleep(3)
 
-            # --- Step 8: Poll for verification email ---
+            # --- Step 9: Poll for verification email ---
             self._progress.emit(PipelineEvent("step", {"step": "wait_email", "message": "Waiting for verification email..."}))
             if self._email_provider:
-                cfg = get_config()
                 mail_cfg = cfg.get("register.mail", {})
                 wait_timeout = float(mail_cfg.get("wait_timeout", 120)) if isinstance(mail_cfg, dict) else 120.0
                 wait_interval = float(mail_cfg.get("wait_interval", 2)) if isinstance(mail_cfg, dict) else 2.0
@@ -250,11 +273,11 @@ class RegistrationPipeline:
                     self._progress.emit(PipelineEvent("error", {"step": "wait_email", "error": error}))
                     return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
 
-            # --- Step 9: Navigate to grok.com to trigger token ---
+            # --- Step 10: Navigate to grok.com to trigger token ---
             self._progress.emit(PipelineEvent("step", {"step": "grok_login", "message": "Logging into Grok..."}))
             await reg_steps.step_navigate_grok(self._browser)
 
-            # --- Step 10: Extract SSO token ---
+            # --- Step 11: Extract SSO token ---
             self._progress.emit(PipelineEvent("step", {"step": "extract_token", "message": "Extracting SSO token..."}))
             token = await reg_steps.step_extract_token(self._browser)
             if not token:
@@ -264,7 +287,7 @@ class RegistrationPipeline:
                 return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
             step_results["extract_token"] = True
 
-            # --- Step 11: Import token into account pool ---
+            # --- Step 12: Import token into account pool ---
             self._progress.emit(PipelineEvent("step", {"step": "import", "message": "Importing account into pool..."}))
             try:
                 from app.control.account.backends.factory import create_repository
@@ -284,7 +307,7 @@ class RegistrationPipeline:
                 step_results["import"] = False
                 logger.warning("registration step: account import failed (token already saved): {}", exc)
 
-            # --- Step 12: Accept ToS, set birth date, enable NSFW ---
+            # --- Step 13: Accept ToS, set birth date, enable NSFW ---
             self._progress.emit(PipelineEvent("step", {"step": "tos_nsfw", "message": "Configuring account (ToS/NSFW)..."}))
             nsfw_ok = await reg_steps.step_accept_tos_and_nsfw(token)
             step_results["tos_nsfw"] = nsfw_ok
