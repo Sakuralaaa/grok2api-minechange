@@ -90,6 +90,13 @@ class BrowserManager:
 
         launch_options: dict[str, Any] = {
             "headless": headless,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ],
+            "ignore_default_args": ["--enable-automation"],
         }
         executable_path = (
             os.getenv("REGISTRATION_BROWSER_EXECUTABLE", "").strip()
@@ -127,6 +134,28 @@ class BrowserManager:
             context_options["storage_state"] = str(self._user_data_dir)
 
         self._context = await self._browser.new_context(**context_options)
+        await self._context.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', {
+              get: () => undefined,
+            });
+            Object.defineProperty(navigator, 'languages', {
+              get: () => ['en-US', 'en'],
+            });
+            Object.defineProperty(navigator, 'plugins', {
+              get: () => [1, 2, 3, 4, 5],
+            });
+            window.chrome = window.chrome || { runtime: {} };
+            const originalQuery = window.navigator.permissions?.query;
+            if (originalQuery) {
+              window.navigator.permissions.query = (parameters) => (
+                parameters && parameters.name === 'notifications'
+                  ? Promise.resolve({ state: Notification.permission })
+                  : originalQuery(parameters)
+              );
+            }
+            """
+        )
         self._page = await self._context.new_page()
         self._running = True
         logger.info(

@@ -51,10 +51,11 @@ async def automation_status():
     """
     cfg = get_config()
     pipeline = get_registration_pipeline()
+    engine = cfg.get_str("register.browser.engine", "drission").strip().lower()
 
     # FlareSolverr
     fs_url = cfg.get_str("proxy.clearance.flaresolverr_url", "")
-    flaresolverr_status = {"configured": bool(fs_url)}
+    flaresolverr_status = {"configured": bool(fs_url), "required": engine == "playwright"}
     if fs_url:
         fs_timeout = cfg.get_int("proxy.clearance.timeout_sec", 30)
         flaresolverr_status["check"] = await check_flaresolverr(
@@ -64,8 +65,10 @@ async def automation_status():
     # Browser
     browser_available = False
     try:
-        from playwright.async_api import async_playwright
-
+        if engine == "drission":
+            import DrissionPage  # noqa: F401
+        else:
+            from playwright.async_api import async_playwright  # noqa: F401
         browser_available = True
     except ImportError:
         pass
@@ -80,6 +83,7 @@ async def automation_status():
     return _json(
         {
             "automated_registration": True,
+            "engine": engine,
             "browser_automation": browser_available,
             "flaresolverr": flaresolverr_status,
             "email_provider_configured": email_provider_configured,
@@ -98,7 +102,7 @@ class StartRegistrationRequest(BaseModel):
     count: int = 1
     pool: str = "basic"
     tags: list[str] = []
-    headless: bool = True
+    headless: bool = False
 
 
 @router.post("/start")
@@ -129,8 +133,9 @@ async def start_registration(req: StartRegistrationRequest):
         )
 
     cfg = get_config()
+    engine = cfg.get_str("register.browser.engine", "drission").strip().lower()
     fs_url = cfg.get_str("proxy.clearance.flaresolverr_url", "")
-    if not fs_url:
+    if engine == "playwright" and not fs_url:
         raise ValidationError(
             "FlareSolverr is not configured. Set [proxy.clearance] flaresolverr_url first.",
             param="flaresolverr_url",

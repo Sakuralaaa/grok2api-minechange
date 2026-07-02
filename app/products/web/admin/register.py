@@ -413,6 +413,7 @@ async def save_mail_config(req: MailConfigRequest):
                 normalized["admin_password"] = str(_existing_mail_provider(index).get("admin_password") or "").strip()
             else:
                 normalized["admin_password"] = str(item.get("admin_password") or "").strip()
+            normalized["email_prefix"] = str(item.get("email_prefix") or "").strip()
         if provider_type == "cloudmail_gen":
             normalized["admin_email"] = str(item.get("admin_email") or "").strip()
             if item.get("admin_password_unchanged"):

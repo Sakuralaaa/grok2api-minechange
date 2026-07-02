@@ -29,6 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 registration = [
+    "DrissionPage>=4.1.1.2",
     "playwright>=1.52.0",
 ]
 
@@ -36,4 +37,3 @@ registration = [
 dev = [
     "ruff>=0.15.0",
 ]
-

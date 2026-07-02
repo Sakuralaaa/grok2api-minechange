@@ -201,8 +201,10 @@ asset_delete_concurrency = 50
 
 # ==================== 自动注册配置 ====================
 [register.browser]
+# 注册自动化引擎（drission / playwright）
+engine = 'drission'
 # 无头模式（不显示浏览器窗口）
-headless = true
+headless = false
 # 浏览器通道（msedge / chromium）
 channel = 'msedge'
 # 代理 URL（不填则复用 proxy.egress.proxy_url）

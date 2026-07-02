@@ -27,6 +27,7 @@ class CloudflareTempEmailProvider:
         self._api_base = str(config.get("api_base", "")).rstrip("/")
         self._domains: list[str] = config.get("domain", [])
         self._admin_password = str(config.get("admin_password", ""))
+        self._email_prefix = str(config.get("email_prefix", "user")).strip()
         self._enabled = bool(config.get("enable", True))
         self._address_jwts: dict[str, str] = {}
 
@@ -55,7 +56,7 @@ class CloudflareTempEmailProvider:
     async def create_email(self, domain: str | None = None) -> str:
         """Create a new temporary email address."""
         chosen_domain = domain or (self._domains[0] if self._domains else "example.com")
-        local_part = self._generate_local_part()
+        local_part = self._generate_local_part(prefix=self._email_prefix)
         result = await self._request(
             "POST",
             "/admin/new_address",
@@ -135,9 +136,12 @@ class CloudflareTempEmailProvider:
         except Exception as exc:
             logger.warning("email provider: dispose failed for {}: {}", email, exc)
 
-    def _generate_local_part(self, length: int = 12) -> str:
+    def _generate_local_part(self, *, prefix: str = "user", length: int = 12) -> str:
+        cleaned_prefix = "".join(ch for ch in str(prefix or "user").lower() if ch.isalnum())
+        if not cleaned_prefix:
+            cleaned_prefix = "user"
         chars = string.ascii_lowercase + string.digits
-        return "user_" + "".join(random.choices(chars, k=length))
+        return cleaned_prefix + "".join(random.choices(chars, k=length))
 
     def _extract_verification_link(self, body: str) -> str | None:
         """Extract a verification URL from email body text."""
