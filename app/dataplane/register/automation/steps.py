@@ -49,6 +49,13 @@ _EMAIL_INPUT_SELECTORS = [
     "input[aria-label*='email' i]",
     "input[aria-label*='邮箱']",
 ]
+_COOKIE_BANNER_SELECTORS = [
+    "#close-pc-btn-handler",
+    "button[aria-label='关闭偏好中心']",
+    "button[aria-label='Close Preference Center']",
+    "#accept-recommended-btn-handler",
+    "#onetrust-accept-btn-handler",
+]
 
 
 async def _click_named_button(page: Any, pattern: re.Pattern[str], *, timeout: int = 2500) -> bool:
@@ -107,16 +114,36 @@ async def _find_email_input(page: Any, *, allow_generic_textbox: bool = False) -
     return None
 
 
+async def _dismiss_cookie_banner(page: Any) -> bool:
+    """Best-effort close for cookie/consent overlays that can block auth UI."""
+    for selector in _COOKIE_BANNER_SELECTORS:
+        try:
+            locator = page.locator(selector)
+            count = await locator.count()
+            for index in range(min(count, 2)):
+                item = locator.nth(index)
+                if await item.is_visible():
+                    await item.click()
+                    await page.wait_for_timeout(500)
+                    return True
+        except Exception:
+            continue
+    return False
+
+
 async def _ensure_email_signup_form(page: Any) -> bool:
     """Navigate the current auth UI to the email-signup form."""
-    for _ in range(4):
+    for _ in range(10):
+        await _dismiss_cookie_banner(page)
         if await _find_email_input(page, allow_generic_textbox=True):
             return True
         if await _click_named_button(page, _EMAIL_SIGNUP_BUTTON):
+            await page.wait_for_timeout(800)
             continue
         if await _click_named_button(page, _HOME_SIGNUP_BUTTON):
+            await page.wait_for_timeout(800)
             continue
-        break
+        await page.wait_for_timeout(800)
     return bool(await _find_email_input(page, allow_generic_textbox=True))
 
 
