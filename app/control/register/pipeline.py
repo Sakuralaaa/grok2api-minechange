@@ -222,6 +222,16 @@ class RegistrationPipeline:
                 return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
             step_results["turnstile"] = True
 
+            # FlareSolverr may navigate/reload the page while solving the challenge.
+            # Refill the email field so submit runs against the live post-challenge form state.
+            self._progress.emit(PipelineEvent("step", {"step": "fill_email_retry", "message": f"Re-filling email after challenge: {email}..."}))
+            if not await reg_steps.step_fill_email(self._browser, email):
+                step_results["fill_email_retry"] = False
+                error = "Failed to refill email field after challenge"
+                self._progress.emit(PipelineEvent("error", {"step": "fill_email_retry", "error": error}))
+                return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+            step_results["fill_email_retry"] = True
+
             # --- Step 7: Submit form ---
             self._progress.emit(PipelineEvent("step", {"step": "submit", "message": "Submitting registration form..."}))
             if not await reg_steps.step_submit_form(self._browser):
@@ -238,6 +248,13 @@ class RegistrationPipeline:
                 # Some flows surface Turnstile or validation only after the first submit.
                 self._progress.emit(PipelineEvent("step", {"step": "turnstile_retry", "message": "Verification page not reached, retrying challenge/submit..."}))
                 await reg_steps.step_handle_turnstile(self._browser)
+                self._progress.emit(PipelineEvent("step", {"step": "fill_email_retry_after_submit", "message": f"Re-filling email after submit retry: {email}..."}))
+                if not await reg_steps.step_fill_email(self._browser, email):
+                    step_results["fill_email_retry_after_submit"] = False
+                    error = "Failed to refill email field after submit retry"
+                    self._progress.emit(PipelineEvent("error", {"step": "fill_email_retry_after_submit", "error": error}))
+                    return {"success": False, "email": email, "token": None, "error": error, "steps": step_results}
+                step_results["fill_email_retry_after_submit"] = True
                 if not await reg_steps.step_submit_form(self._browser):
                     step_results["wait_verification_page"] = False
                     error = "Verification page not reached after submit retry"
