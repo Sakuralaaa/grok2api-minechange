@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,7 @@ class DrissionRegistrationRunner:
     def __init__(self) -> None:
         self.browser: Any = None
         self.page: Any = None
+        self._xvfb_process: subprocess.Popen[str] | None = None
 
     def start(
         self,
@@ -75,6 +77,7 @@ class DrissionRegistrationRunner:
         from DrissionPage import Chromium, ChromiumOptions
 
         self.stop()
+        self._ensure_virtual_display(headless=headless)
         co = ChromiumOptions()
         co.auto_port()
         co.set_timeouts(base=1)
@@ -111,6 +114,16 @@ class DrissionRegistrationRunner:
                 pass
         self.browser = None
         self.page = None
+        if self._xvfb_process is not None:
+            try:
+                self._xvfb_process.terminate()
+                self._xvfb_process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._xvfb_process.kill()
+                except Exception:
+                    pass
+            self._xvfb_process = None
 
     def refresh_active_page(self) -> Any:
         if self.browser is None:
@@ -632,6 +645,63 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
             if Path(candidate).exists():
                 return candidate
         return None
+
+    def _ensure_virtual_display(self, *, headless: bool) -> None:
+        """Start Xvfb when a headed browser is required inside Linux containers."""
+        if headless:
+            return
+        if os.name != "posix":
+            return
+        if os.environ.get("DISPLAY"):
+            return
+
+        xvfb_binary = self._find_binary("Xvfb")
+        if not xvfb_binary:
+            raise RuntimeError("headed DrissionPage session requires Xvfb, but Xvfb is not installed")
+
+        display = self._pick_display()
+        cmd = [
+            xvfb_binary,
+            display,
+            "-screen",
+            "0",
+            "1280x800x24",
+            "-ac",
+            "-nolisten",
+            "tcp",
+        ]
+        self._xvfb_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        os.environ["DISPLAY"] = display
+        time.sleep(0.8)
+        if self._xvfb_process.poll() is not None:
+            self._xvfb_process = None
+            raise RuntimeError("failed to start Xvfb for headed DrissionPage session")
+        logger.info("drission registration: started virtual display {}", display)
+
+    @staticmethod
+    def _find_binary(name: str) -> str | None:
+        path_entries = os.environ.get("PATH", "").split(os.pathsep)
+        for entry in path_entries:
+            if not entry:
+                continue
+            candidate = Path(entry) / name
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    @staticmethod
+    def _pick_display() -> str:
+        for number in range(90, 100):
+            lock_path = Path(f"/tmp/.X{number}-lock")
+            socket_path = Path(f"/tmp/.X11-unix/X{number}")
+            if not lock_path.exists() and not socket_path.exists():
+                return f":{number}"
+        return ":99"
 
 
 __all__ = ["DrissionRegistrationRunner"]

@@ -35,8 +35,9 @@ RUN uv sync --frozen --no-dev --no-install-project \
     && (find /opt/venv -type f -name "*.so" -exec strip --strip-unneeded {} + 2>/dev/null || true) \
     && rm -rf /root/.cache /tmp/uv-cache
 
-RUN uv pip install --python /opt/venv/bin/python "playwright>=1.52.0" \
+RUN uv pip install --python /opt/venv/bin/python "playwright>=1.52.0" "DrissionPage>=4.1.1.2" \
     && /opt/venv/bin/python -c "import playwright; from playwright.async_api import async_playwright; print('builder playwright ok')" \
+    && /opt/venv/bin/python -c "import DrissionPage; print('builder drission ok')" \
     && rm -rf /root/.cache /tmp/uv-cache
 
 # Runtime
@@ -64,6 +65,7 @@ RUN set -eux; \
         libcurl4 \
         libgcc-s1 \
         libstdc++6 \
+        xvfb \
         chromium \
     ; \
     rm -rf /var/lib/apt/lists/*; \
@@ -82,6 +84,8 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 
 RUN /opt/venv/bin/python -c "import playwright; from playwright.async_api import async_playwright; print('runtime playwright ok')" \
+    && /opt/venv/bin/python -c "import DrissionPage; print('runtime drission ok')" \
+    && command -v Xvfb >/dev/null \
     && test -x "$REGISTRATION_BROWSER_EXECUTABLE"
 
 COPY pyproject.toml config.defaults.toml ./
