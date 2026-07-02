@@ -136,6 +136,22 @@ async def _page_has_cloudflare_gate(page: Any) -> bool:
     return any(marker in text for marker in _CF_CHALLENGE_MARKERS)
 
 
+async def _describe_page(page: Any) -> str:
+    """Return a short diagnostic string for the current page state."""
+    try:
+        title = await page.title()
+    except Exception:
+        title = ""
+
+    try:
+        body_text = ((await page.inner_text("body")) if await page.query_selector("body") else "").strip()
+    except Exception:
+        body_text = ""
+
+    snippet = " ".join(body_text.split())[:240]
+    return f"url={page.url} title={title!r} body={snippet!r}"
+
+
 async def step_prepare_signup_clearance(
     *,
     flaresolverr_url: str | None = None,
@@ -167,28 +183,37 @@ async def step_prepare_signup_clearance(
     return {"ok": False, "error": error, "target_url": _SIGNUP_URL}
 
 
-async def step_navigate_signup(browser: BrowserManager) -> bool:
+async def step_navigate_signup(
+    browser: BrowserManager,
+    *,
+    preferred_url: str | None = None,
+) -> bool:
     """Navigate to the Grok / x.ai signup page."""
     try:
         page = browser.page
-        await page.goto(_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
-        await page.wait_for_timeout(2000)
-        if await _page_has_cloudflare_gate(page):
-            logger.info("registration step: CF gate detected before email signup page, invoking FlareSolverr")
-            if not await step_handle_turnstile(browser, current_url=page.url or _SIGNUP_URL, force=True):
-                return False
-        if "accounts.x.ai" not in page.url.lower():
-            await page.goto(_GROK_SIGNUP_URL, wait_until="domcontentloaded", timeout=30000)
+        candidate_urls: list[str] = []
+        for url in (preferred_url, _SIGNUP_URL, _GROK_SIGNUP_URL):
+            if url and url not in candidate_urls:
+                candidate_urls.append(url)
+
+        for target_url in candidate_urls:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(2000)
             if await _page_has_cloudflare_gate(page):
-                logger.info("registration step: CF gate detected on Grok signup page, invoking FlareSolverr")
-                if not await step_handle_turnstile(browser, current_url=page.url or _GROK_SIGNUP_URL, force=True):
-                    return False
-        if not await _ensure_email_signup_form(page):
-            logger.warning("registration step: email signup form not available after navigation")
-            return False
-        logger.info("registration step: navigated to email signup page")
-        return True
+                logger.info("registration step: CF gate detected on {}, invoking FlareSolverr", target_url)
+                if not await step_handle_turnstile(browser, current_url=target_url, force=True):
+                    continue
+            if await _ensure_email_signup_form(page):
+                logger.info("registration step: navigated to email signup page via {}", target_url)
+                return True
+            logger.warning(
+                "registration step: email signup form not available on {} ({})",
+                target_url,
+                await _describe_page(page),
+            )
+
+        logger.warning("registration step: all signup navigation targets failed")
+        return False
     except Exception as exc:
         logger.warning("registration step: navigate signup failed: {}", exc)
         return False
@@ -252,12 +277,12 @@ async def step_handle_turnstile(
                 cookies = result.get("cookies", [])
                 if cookies:
                     await browser.inject_flaresolverr_cookies(cookies)
-                await page.reload(wait_until="domcontentloaded")
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(2000)
                 if not await _page_has_cloudflare_gate(page):
                     logger.info("registration step: CF challenge resolved and cookies injected")
                     return True
-                logger.warning("registration step: CF challenge still present after reload, retrying")
+                logger.warning("registration step: CF challenge still present after navigation, retrying")
             else:
                 logger.warning(
                     "registration step: CF resolve attempt {}/{} failed: {}",

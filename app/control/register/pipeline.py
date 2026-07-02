@@ -177,7 +177,10 @@ class RegistrationPipeline:
 
             # --- Step 3: Navigate to signup ---
             self._progress.emit(PipelineEvent("step", {"step": "navigate", "message": "Navigating to email signup page..."}))
-            if not await reg_steps.step_navigate_signup(self._browser):
+            if not await reg_steps.step_navigate_signup(
+                self._browser,
+                preferred_url=(clearance_bundle or {}).get("target_url"),
+            ):
                 step_results["navigate"] = False
                 error = "Navigation to email signup page failed"
                 self._progress.emit(PipelineEvent("error", {"step": "navigate", "error": error}))
