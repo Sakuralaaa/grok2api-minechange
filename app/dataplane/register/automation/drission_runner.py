@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,9 @@ class DrissionRegistrationRunner:
         self.browser: Any = None
         self.page: Any = None
         self._xvfb_process: subprocess.Popen[str] | None = None
+        self._managed_display: str | None = None
+        self._previous_display: str | None = None
+        self._tmp_root: Path | None = None
 
     def start(
         self,
@@ -78,7 +83,9 @@ class DrissionRegistrationRunner:
 
         self.stop()
         self._ensure_virtual_display(headless=headless)
+        self._tmp_root = self._make_tmp_root()
         co = ChromiumOptions()
+        co.set_tmp_path(str(self._tmp_root))
         co.auto_port()
         co.set_timeouts(base=1)
         co.add_extension(str(_PATCH_DIR))
@@ -89,6 +96,17 @@ class DrissionRegistrationRunner:
         co.set_argument("--no-first-run")
         co.set_argument("--no-default-browser-check")
         co.set_argument("--window-size", "1280,800")
+        co.set_argument("--remote-debugging-address", "127.0.0.1")
+        co.set_argument("--password-store", "basic")
+        co.set_argument("--use-mock-keychain")
+
+        if os.name == "posix":
+            # Chromium runs as root in many Docker deployments; these flags are
+            # required before the DevTools port can come up reliably.
+            co.set_argument("--no-sandbox")
+            co.set_argument("--disable-setuid-sandbox")
+            co.set_argument("--disable-gpu")
+            co.set_argument("--no-zygote")
 
         resolved_browser = self._resolve_browser_path(executable_path, browser_channel)
         if resolved_browser:
@@ -96,14 +114,25 @@ class DrissionRegistrationRunner:
         if proxy_url:
             co.set_proxy(proxy_url)
 
-        self.browser = Chromium(co)
+        try:
+            self.browser = Chromium(co)
+        except Exception as exc:
+            context = self._browser_start_context(
+                headless=headless,
+                proxy_url=proxy_url,
+                resolved_browser=resolved_browser,
+                tmp_root=self._tmp_root,
+            )
+            raise RuntimeError(f"DrissionPage browser start failed: {exc}; {context}") from exc
         tabs = self.browser.get_tabs()
         self.page = tabs[-1] if tabs else self.browser.new_tab()
         logger.info(
-            "drission registration browser started: headless={} proxy={} browser={}",
+            "drission registration browser started: headless={} proxy={} browser={} tmp={} display={}",
             headless,
             bool(proxy_url),
             resolved_browser or "auto",
+            self._tmp_root,
+            os.environ.get("DISPLAY", ""),
         )
 
     def stop(self) -> None:
@@ -124,6 +153,16 @@ class DrissionRegistrationRunner:
                 except Exception:
                     pass
             self._xvfb_process = None
+        if self._managed_display and os.environ.get("DISPLAY") == self._managed_display:
+            if self._previous_display is None:
+                os.environ.pop("DISPLAY", None)
+            else:
+                os.environ["DISPLAY"] = self._previous_display
+        self._managed_display = None
+        self._previous_display = None
+        if self._tmp_root is not None:
+            shutil.rmtree(self._tmp_root, ignore_errors=True)
+            self._tmp_root = None
 
     def refresh_active_page(self) -> Any:
         if self.browser is None:
@@ -620,7 +659,7 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
 
     @staticmethod
     def _resolve_browser_path(executable_path: str | None, browser_channel: str | None) -> str | None:
-        explicit = str(executable_path or "").strip()
+        explicit = str(executable_path or os.getenv("REGISTRATION_BROWSER_EXECUTABLE", "")).strip()
         if explicit and Path(explicit).exists():
             return explicit
 
@@ -641,6 +680,18 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
                         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
                     ]
                 )
+        else:
+            if channel in {"", "chrome", "chromium", "msedge", "edge"}:
+                candidates.extend(
+                    [
+                        "/usr/local/bin/registration-chromium",
+                        "/usr/bin/chromium",
+                        "/usr/bin/chromium-browser",
+                        "/usr/bin/google-chrome",
+                        "/usr/bin/google-chrome-stable",
+                        "/opt/google/chrome/chrome",
+                    ]
+                )
         for candidate in candidates:
             if Path(candidate).exists():
                 return candidate
@@ -654,6 +705,13 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
             return
         if os.environ.get("DISPLAY"):
             return
+
+        x11_socket_dir = Path("/tmp/.X11-unix")
+        try:
+            x11_socket_dir.mkdir(parents=True, exist_ok=True)
+            x11_socket_dir.chmod(0o1777)
+        except Exception:
+            logger.debug("drission registration: unable to prepare /tmp/.X11-unix")
 
         xvfb_binary = self._find_binary("Xvfb")
         if not xvfb_binary:
@@ -676,12 +734,58 @@ Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
             stderr=subprocess.DEVNULL,
             text=True,
         )
+        self._previous_display = os.environ.get("DISPLAY")
+        self._managed_display = display
         os.environ["DISPLAY"] = display
-        time.sleep(0.8)
-        if self._xvfb_process.poll() is not None:
+        socket_path = Path(f"/tmp/.X11-unix/X{display.lstrip(':')}")
+        deadline = time.time() + 5
+        while time.time() < deadline and self._xvfb_process.poll() is None:
+            if socket_path.exists():
+                break
+            time.sleep(0.1)
+        if self._xvfb_process.poll() is not None or not socket_path.exists():
             self._xvfb_process = None
+            self._managed_display = None
+            self._previous_display = None
+            os.environ.pop("DISPLAY", None)
             raise RuntimeError("failed to start Xvfb for headed DrissionPage session")
         logger.info("drission registration: started virtual display {}", display)
+
+    @staticmethod
+    def _make_tmp_root() -> Path:
+        base = Path(os.getenv("DRISSION_TMP_DIR", "") or Path(tempfile.gettempdir()) / "grok2api-drission")
+        base.mkdir(parents=True, exist_ok=True)
+        root = base / f"run-{os.getpid()}-{secrets.token_hex(6)}"
+        root.mkdir(parents=True, exist_ok=False)
+        return root
+
+    @staticmethod
+    def _browser_start_context(
+        *,
+        headless: bool,
+        proxy_url: str | None,
+        resolved_browser: str | None,
+        tmp_root: Path | None,
+    ) -> str:
+        display = os.environ.get("DISPLAY", "")
+        browser = resolved_browser or "auto"
+        browser_version = ""
+        if resolved_browser:
+            try:
+                completed = subprocess.run(
+                    [resolved_browser, "--version"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                browser_version = (completed.stdout or completed.stderr or "").strip()
+            except Exception as exc:
+                browser_version = f"version check failed: {exc}"
+        return (
+            f"headless={headless} proxy={bool(proxy_url)} browser={browser!r} "
+            f"browser_version={browser_version!r} display={display!r} tmp={str(tmp_root)!r}"
+        )
 
     @staticmethod
     def _find_binary(name: str) -> str | None:

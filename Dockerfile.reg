@@ -48,6 +48,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=Asia/Shanghai \
     VIRTUAL_ENV=/opt/venv \
     REGISTRATION_BROWSER_EXECUTABLE=/usr/local/bin/registration-chromium \
+    DRISSION_TMP_DIR=/tmp/grok2api-drission \
     SERVER_HOST=0.0.0.0 \
     SERVER_PORT=8000 \
     SERVER_WORKERS=1
@@ -67,6 +68,8 @@ RUN set -eux; \
         libstdc++6 \
         xvfb \
         chromium \
+        fonts-liberation \
+        fonts-noto-color-emoji \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     chromium_path=""; \
@@ -92,7 +95,8 @@ COPY pyproject.toml config.defaults.toml ./
 COPY app ./app
 COPY scripts ./scripts
 
-RUN mkdir -p /app/data /app/logs \
+RUN mkdir -p /app/data /app/logs /tmp/grok2api-drission /tmp/.X11-unix \
+    && chmod 1777 /tmp/grok2api-drission /tmp/.X11-unix \
     && chmod +x /app/scripts/entrypoint.sh /app/scripts/init_storage.sh
 
 EXPOSE 8000
