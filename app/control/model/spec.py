@@ -47,6 +47,9 @@ class ModelSpec:
     def is_voice(self) -> bool:
         return bool(self.capability & Capability.VOICE)
 
+    def is_console_chat(self) -> bool:
+        return bool(self.capability & Capability.CONSOLE_CHAT)
+
     def pool_name(self) -> str:
         """Return the canonical pool string for this tier."""
         if self.tier == Tier.SUPER:
@@ -78,6 +81,8 @@ class ModelSpec:
           SUPER tier  → try heavy first, then super
           HEAVY tier  → heavy only
         """
+        if self.is_console_chat():
+            return (0,)
         if self.prefer_best:
             if self.tier == Tier.HEAVY:
                 return (2,)  # heavy only

@@ -118,9 +118,15 @@ enabled = true
 basic_interval_sec = 86400   # basic 号池周期（秒）：quota 模式用于后台刷新，random 模式用于 429 冷却；默认 86400s
 super_interval_sec = 7200    # super 号池周期（秒）：quota 模式用于后台刷新，random 模式用于 429 冷却；默认 7200s
 heavy_interval_sec = 7200    # heavy 号池周期（秒）：quota 模式用于后台刷新，random 模式用于 429 冷却；默认 7200s
-usage_concurrency = 50
+usage_concurrency = 15
 on_demand_min_interval_sec = 300
 
+
+[account.cleanup]
+deleted_retention_days = 7
+run_at = "03:30"
+batch_size = 5000
+vacuum = false
 
 [account.selection]
 # 单号并发上限（两模式共用）

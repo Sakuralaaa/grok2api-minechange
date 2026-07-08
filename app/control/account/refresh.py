@@ -51,6 +51,7 @@ _MODE_KEYS = {
     2: "quota_expert",
     3: "quota_heavy",
     4: "quota_grok_4_3",
+    5: "quota_console",
 }
 
 
@@ -429,6 +430,25 @@ class AccountRefreshService:
                 token[:10],
                 exc,
             )
+
+
+    async def reset_expired_console_windows(self) -> int:
+        reset = getattr(self._repo, "reset_expired_console_windows", None)
+        if not callable(reset):
+            return 0
+        count = await reset()
+        if count:
+            logger.debug("console quota windows auto-reset: count={}", count)
+        return int(count or 0)
+
+    async def recover_console_expired_accounts(self) -> int:
+        recover = getattr(self._repo, "recover_console_expired_accounts", None)
+        if not callable(recover):
+            return 0
+        count = await recover()
+        if count:
+            logger.info("console expired accounts auto-recovered: count={}", count)
+        return int(count or 0)
 
     async def _apply_single_mode(
         self,

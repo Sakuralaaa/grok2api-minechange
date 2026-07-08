@@ -61,7 +61,7 @@ async def _available_pools(request: Request) -> frozenset[str]:
 def _model_available_for_pools(spec: ModelSpec, pools: frozenset[str]) -> bool:
     if not spec.enabled:
         return False
-    if "basic" in pools and is_console_basic_model(spec.model_name):
+    if "basic" in pools and (spec.is_console_chat() or is_console_basic_model(spec.model_name)):
         return True
     for pool_id in spec.pool_candidates():
         pool = _POOL_ID_TO_NAME[pool_id]

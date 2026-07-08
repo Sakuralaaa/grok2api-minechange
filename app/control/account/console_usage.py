@@ -20,9 +20,9 @@ KEY_GROK_4_3 = "grok_4_3"
 KEY_MULTI_AGENT = "multi_agent"
 
 MODE_BY_KEY = {
-    KEY_REASONING: 2,
-    KEY_MULTI_AGENT: 3,
-    KEY_GROK_4_3: 4,
+    KEY_REASONING: 5,
+    KEY_MULTI_AGENT: 5,
+    KEY_GROK_4_3: 5,
 }
 
 LABEL_BY_KEY = {

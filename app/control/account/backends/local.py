@@ -17,10 +17,18 @@ from ..models import (
     AccountRecord,
     RuntimeSnapshot,
 )
-from ..quota_defaults import default_quota_set
+from ..quota_defaults import default_quota_set, BASIC_CONSOLE_LIMIT, BASIC_CONSOLE_WINDOW_SECONDS
 
 _TBL = "accounts"
 _META = "account_meta"
+_TOKEN_PAYLOAD_QUOTAS = (
+    ("auto", "quota_auto", True),
+    ("fast", "quota_fast", True),
+    ("expert", "quota_expert", True),
+    ("heavy", "quota_heavy", False),
+    ("grok_4_3", "quota_grok_4_3", False),
+    ("console", "quota_console", True),
+)
 
 
 class LocalAccountRepository:
@@ -37,8 +45,11 @@ class LocalAccountRepository:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
@@ -65,6 +76,7 @@ class LocalAccountRepository:
                     quota_expert       TEXT    NOT NULL DEFAULT '{{}}',
                     quota_heavy        TEXT    NOT NULL DEFAULT '{{}}',
                     quota_grok_4_3     TEXT    NOT NULL DEFAULT '{{}}',
+                    quota_console      TEXT    NOT NULL DEFAULT '{{}}',
                     usage_use_count    INTEGER NOT NULL DEFAULT 0,
                     usage_fail_count   INTEGER NOT NULL DEFAULT 0,
                     usage_sync_count   INTEGER NOT NULL DEFAULT 0,
@@ -84,8 +96,11 @@ class LocalAccountRepository:
                     ON {_TBL} (pool, status);
                 CREATE INDEX IF NOT EXISTS idx_acc_deleted
                     ON {_TBL} (deleted_at) WHERE deleted_at IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_acc_live_updated
+                    ON {_TBL} (updated_at DESC) WHERE deleted_at IS NULL;
             """)
             self._ensure_column_sync(conn, "quota_grok_4_3", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column_sync(conn, "quota_console", "TEXT NOT NULL DEFAULT '{}'")
             conn.commit()
 
     @staticmethod
@@ -115,17 +130,53 @@ class LocalAccountRepository:
         d["tags"]  = json.loads(d.get("tags")  or "[]")
         heavy_raw     = d.pop("quota_heavy",     "{}") or "{}"
         grok_4_3_raw  = d.pop("quota_grok_4_3",  "{}") or "{}"
+        console_raw   = d.pop("quota_console",   "{}") or "{}"
         heavy_dict    = json.loads(heavy_raw)
         grok_4_3_dict = json.loads(grok_4_3_raw)
+        console_dict  = json.loads(console_raw)
         d["quota"] = {
             "auto":   json.loads(d.pop("quota_auto",   "{}") or "{}"),
             "fast":   json.loads(d.pop("quota_fast",   "{}") or "{}"),
             "expert": json.loads(d.pop("quota_expert", "{}") or "{}"),
             **({"heavy":    heavy_dict}    if heavy_dict    else {}),
             **({"grok_4_3": grok_4_3_dict} if grok_4_3_dict else {}),
+            **({"console":  console_dict}  if console_dict  else {}),
         }
         d["ext"] = json.loads(d.get("ext") or "{}")
         return AccountRecord.model_validate(d)
+
+
+    @staticmethod
+    def _parse_tags(raw: Any) -> list[str]:
+        try:
+            tags = json.loads(raw or "[]")
+        except (TypeError, ValueError):
+            return []
+        return tags if isinstance(tags, list) else []
+
+    @staticmethod
+    def _payload_int(row: sqlite3.Row, key: str) -> int:
+        value = row[key]
+        return int(value) if value is not None else 0
+
+    @classmethod
+    def _row_to_token_payload(cls, row: sqlite3.Row) -> dict[str, Any]:
+        quota: dict[str, dict[str, int]] = {}
+        for mode, _column, always_include in _TOKEN_PAYLOAD_QUOTAS:
+            remaining = cls._payload_int(row, f"{mode}_remaining")
+            total = cls._payload_int(row, f"{mode}_total")
+            if always_include or remaining or total:
+                quota[mode] = {"remaining": remaining, "total": total}
+        return {
+            "token": row["token"],
+            "pool": row["pool"],
+            "status": row["status"],
+            "tags": cls._parse_tags(row["tags"]),
+            "quota": quota,
+            "use_count": int(row["usage_use_count"] or 0),
+            "fail_count": int(row["usage_fail_count"] or 0),
+            "last_use_at": row["last_use_at"],
+        }
 
     @staticmethod
     def _record_to_row(record: AccountRecord, revision: int) -> dict[str, Any]:
@@ -142,6 +193,7 @@ class LocalAccountRepository:
             "quota_expert":     json.dumps(qs.expert.to_dict()),
             "quota_heavy":      json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
             "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+            "quota_console":    json.dumps(qs.console.to_dict())   if qs.console  else "{}",
             "usage_use_count":  record.usage_use_count,
             "usage_fail_count": record.usage_fail_count,
             "usage_sync_count": record.usage_sync_count,
@@ -175,12 +227,12 @@ class LocalAccountRepository:
                 f"""
                 INSERT INTO {_TBL} (
                     token, pool, status, created_at, updated_at,
-                    tags, quota_auto, quota_fast, quota_expert, quota_heavy, quota_grok_4_3,
+                    tags, quota_auto, quota_fast, quota_expert, quota_heavy, quota_grok_4_3, quota_console,
                     usage_use_count, usage_fail_count, usage_sync_count,
                     ext, revision
                 ) VALUES (
                     :token, :pool, 'active', :ts, :ts,
-                    :tags, :qa, :qf, :qe, :qh, :qg,
+                    :tags, :qa, :qf, :qe, :qh, :qg, :qc,
                     0, 0, 0, :ext, :rev
                 )
                 ON CONFLICT(token) DO UPDATE SET
@@ -202,6 +254,7 @@ class LocalAccountRepository:
                     "qe":    json.dumps(qs.expert.to_dict()),
                     "qh":    json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
                     "qg":    json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+                    "qc":    json.dumps(qs.console.to_dict()) if qs.console else "{}",
                     "ext":   json.dumps(item.ext),
                     "rev":   revision,
                 },
@@ -265,6 +318,8 @@ class LocalAccountRepository:
                 sets["quota_heavy"] = json.dumps(patch.quota_heavy)
             if patch.quota_grok_4_3 is not None:
                 sets["quota_grok_4_3"] = json.dumps(patch.quota_grok_4_3)
+            if patch.quota_console is not None:
+                sets["quota_console"] = json.dumps(patch.quota_console)
 
             # Tags — use set arithmetic to avoid O(n×m) membership tests.
             tag_set: set[str] = set(record.tags)
@@ -506,6 +561,123 @@ class LocalAccountRepository:
                     upserted=upserted, deleted=deleted, revision=rev
                 )
 
+        async with self._lock:
+            return await asyncio.to_thread(_sync)
+
+
+    @classmethod
+    def _token_payload_select_sql(cls) -> str:
+        quota_select = ", ".join(
+            f"CASE WHEN json_valid({column}) THEN json_extract({column}, '$.remaining') END AS {mode}_remaining, "
+            f"CASE WHEN json_valid({column}) THEN json_extract({column}, '$.total') END AS {mode}_total"
+            for mode, column, _always_include in _TOKEN_PAYLOAD_QUOTAS
+        )
+        return f"""
+            SELECT token, pool, status, tags, usage_use_count, usage_fail_count,
+                   last_use_at, {quota_select}
+            FROM {_TBL}
+            WHERE deleted_at IS NULL
+            ORDER BY updated_at DESC
+        """
+
+    async def list_token_payloads(self) -> list[dict[str, Any]]:
+        def _sync() -> list[dict[str, Any]]:
+            with closing(self._connect()) as conn:
+                rows = conn.execute(self._token_payload_select_sql()).fetchall()
+                return [self._row_to_token_payload(r) for r in rows]
+        return await asyncio.to_thread(_sync)
+
+    async def list_invalid_tokens(self) -> list[str]:
+        def _sync() -> list[str]:
+            with closing(self._connect()) as conn:
+                rows = conn.execute(
+                    f"SELECT token FROM {_TBL} WHERE deleted_at IS NULL AND status IN (?, ?)",
+                    (AccountStatus.EXPIRED.value, AccountStatus.DISABLED.value),
+                ).fetchall()
+                return [str(r[0]) for r in rows]
+        return await asyncio.to_thread(_sync)
+
+    async def purge_deleted_accounts(self, *, deleted_before_ms: int, batch_size: int, vacuum: bool = False) -> int:
+        def _sync() -> int:
+            with closing(self._connect()) as conn:
+                total = 0
+                while True:
+                    rows = conn.execute(
+                        f"SELECT token FROM {_TBL} WHERE deleted_at IS NOT NULL AND deleted_at <= ? ORDER BY deleted_at ASC LIMIT ?",
+                        (int(deleted_before_ms), max(1, int(batch_size))),
+                    ).fetchall()
+                    tokens = [r[0] for r in rows]
+                    if not tokens:
+                        break
+                    placeholders = ",".join("?" * len(tokens))
+                    conn.execute(f"DELETE FROM {_TBL} WHERE token IN ({placeholders})", tokens)
+                    total += int(conn.execute("SELECT changes()").fetchone()[0])
+                    conn.commit()
+                if total and vacuum:
+                    conn.execute("VACUUM")
+                return total
+        async with self._lock:
+            return await asyncio.to_thread(_sync)
+
+    async def reset_expired_console_windows(self) -> int:
+        def _sync() -> int:
+            ts = now_ms()
+            reset_window = json.dumps({
+                "remaining": BASIC_CONSOLE_LIMIT,
+                "total": BASIC_CONSOLE_LIMIT,
+                "window_seconds": BASIC_CONSOLE_WINDOW_SECONDS,
+                "reset_at": None,
+                "synced_at": ts,
+                "source": 0,
+            })
+            with closing(self._connect()) as conn:
+                rev = self._bump_revision(conn)
+                conn.execute(
+                    f"UPDATE {_TBL} SET quota_console = ?, updated_at = ?, revision = ? "
+                    f"WHERE deleted_at IS NULL AND json_valid(quota_console) "
+                    f"AND CAST(json_extract(quota_console, '$.remaining') AS INTEGER) <= 0 "
+                    f"AND CAST(json_extract(quota_console, '$.reset_at') AS INTEGER) <= ?",
+                    (reset_window, ts, rev, ts),
+                )
+                count = int(conn.execute("SELECT changes()").fetchone()[0])
+                conn.commit()
+                return count
+        async with self._lock:
+            return await asyncio.to_thread(_sync)
+
+    async def recover_console_expired_accounts(self) -> int:
+        def _sync() -> int:
+            ts = now_ms()
+            cutoff = ts - 3_600_000
+            with closing(self._connect()) as conn:
+                rows = conn.execute(
+                    f"SELECT token, ext FROM {_TBL} WHERE deleted_at IS NULL AND status = ? "
+                    f"AND state_reason = ? AND usage_use_count > 5",
+                    (AccountStatus.EXPIRED.value, "console_429_threshold_exceeded"),
+                ).fetchall()
+                updates: list[tuple[str, int, int, str]] = []
+                for row in rows:
+                    try:
+                        ext = json.loads(row["ext"] or "{}")
+                    except (TypeError, ValueError):
+                        ext = {}
+                    if int(ext.get("expired_at") or 0) > cutoff:
+                        continue
+                    for key in ("expired_at", "expired_reason", "console_429_count", "console_429_last_at"):
+                        ext.pop(key, None)
+                    updates.append((json.dumps(ext), ts, 0, row["token"]))
+                if not updates:
+                    return 0
+                rev = self._bump_revision(conn)
+                conn.executemany(
+                    f"UPDATE {_TBL} SET ext = ?, updated_at = ?, usage_fail_count = ?, "
+                    f"status = 'active', last_fail_at = NULL, last_fail_reason = NULL, state_reason = NULL, revision = ? "
+                    f"WHERE token = ?",
+                    [(ext, updated, fail_count, rev, token) for ext, updated, fail_count, token in updates],
+                )
+                count = int(conn.execute("SELECT changes()").fetchone()[0])
+                conn.commit()
+                return count
         async with self._lock:
             return await asyncio.to_thread(_sync)
 

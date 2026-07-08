@@ -51,6 +51,8 @@ _DEFAULT_CONSOLE_USER_AGENT = (
 _DEFAULT_CONSOLE_BROWSER = "edge"
 
 _CONSOLE_MODEL_MAP: dict[str, str] = {
+    "grok-4.20-0309-non-reasoning-console": "grok-4.20-0309-non-reasoning",
+    "grok-4.20-0309-console": "grok-4.20-0309",
     "grok-4.20-0309-reasoning-console": "grok-4.20-0309-reasoning",
     "grok-4.20-reasoning-console": "grok-4.20-0309-reasoning",
     "grok-4.20-expert-console": "grok-4.20-0309-reasoning",
@@ -59,6 +61,7 @@ _CONSOLE_MODEL_MAP: dict[str, str] = {
     "grok-4.3-low-console": "grok-4.3",
     "grok-4.3-medium-console": "grok-4.3",
     "grok-4.3-high-console": "grok-4.3",
+    "grok-4.5-console": "grok-4.5",
     "grok-4.20-multi-agent-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-heavy-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-multi-agent-0309-console": "grok-4.20-multi-agent-0309",
@@ -70,6 +73,7 @@ _CONSOLE_MODEL_MAP: dict[str, str] = {
     "grok-4.20-multi-agent-medium-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-multi-agent-high-console": "grok-4.20-multi-agent-0309",
     "grok-4.20-multi-agent-xhigh-console": "grok-4.20-multi-agent-0309",
+    "grok-build-console": "grok-build-0.1",
 }
 
 _CONSOLE_FIXED_EFFORT: dict[str, str] = {
@@ -97,6 +101,7 @@ _CONSOLE_EFFORT_MAP: dict[str, str] = {
 
 _CONSOLE_MODELS_WITH_REASONING_FIELD = frozenset({
     "grok-4.3",
+    "grok-4.5",
     "grok-4.20-multi-agent-0309",
 })
 

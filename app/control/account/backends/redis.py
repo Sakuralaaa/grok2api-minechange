@@ -64,6 +64,7 @@ class RedisAccountRepository:
             "quota_fast":       json.dumps(qs.fast.to_dict()),
             "quota_expert":     json.dumps(qs.expert.to_dict()),
             "quota_heavy":      json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
+            "quota_console":    json.dumps(qs.console.to_dict()) if qs.console else "{}",
             "usage_use_count":  str(record.usage_use_count),
             "usage_fail_count": str(record.usage_fail_count),
             "usage_sync_count": str(record.usage_sync_count),
@@ -102,6 +103,9 @@ class RedisAccountRepository:
                 **({
                     "heavy": json.loads(_s("quota_heavy"))
                 } if _s("quota_heavy") and _s("quota_heavy") != "{}" else {}),
+                **({
+                    "console": json.loads(_s("quota_console"))
+                } if _s("quota_console") and _s("quota_console") != "{}" else {}),
             },
             "usage_use_count":  int(_s("usage_use_count")  or 0),
             "usage_fail_count": int(_s("usage_fail_count") or 0),

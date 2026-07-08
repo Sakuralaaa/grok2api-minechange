@@ -109,7 +109,7 @@ class SaveTokensRequest(RootModel[dict[str, list[str | TokenImportItem]]]):
 def _quota_brief(q: dict) -> dict:
     """Extract quota windows with only remaining/total from stored quota dict."""
     out = {}
-    for mode in ("auto", "fast", "expert", "heavy"):
+    for mode in ("auto", "fast", "expert", "heavy", "grok_4_3", "console"):
         v = q.get(mode)
         if isinstance(v, dict):
             out[mode] = {
@@ -142,9 +142,17 @@ def _json(data) -> Response:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/tokens")
-async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
-    """Return flat token list."""
+
+async def _list_token_payloads(repo: "AccountRepository") -> list[dict]:
+    fast_list = getattr(repo, "list_token_payloads", None)
+    if callable(fast_list):
+        items = await fast_list()
+        for item in items:
+            item.setdefault("console_usage", {})
+            if "last_use_at" in item and "last_used_at" not in item:
+                item["last_used_at"] = item.pop("last_use_at")
+        return items
+
     all_items: list = []
     page_num = 1
     while True:
@@ -153,8 +161,12 @@ async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
         if page_num * 2000 >= page.total:
             break
         page_num += 1
+    return [_serialize_record(r) for r in all_items]
 
-    return _json({"tokens": [_serialize_record(r) for r in all_items]})
+@router.get("/tokens")
+async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
+    """Return flat token list."""
+    return _json({"tokens": await _list_token_payloads(repo)})
 
 
 @router.post("/tokens")
