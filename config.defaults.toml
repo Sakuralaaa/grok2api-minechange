@@ -127,16 +127,6 @@ on_demand_min_interval_sec = 300
 max_inflight = 8
 
 
-# ==================== Register panel helpers ====================
-[register.mail]
-# Mail provider config used by the admin Register page for connectivity checks only.
-# Supported provider types: cloudflare_temp_email, cloudmail_gen.
-request_timeout = 30
-wait_timeout = 30
-wait_interval = 2
-providers = []
-
-
 # ==================== 对话配置 ====================
 [chat]
 timeout = 60
@@ -198,16 +188,3 @@ asset_upload_concurrency = 10
 asset_list_concurrency   = 50
 # 删除 Asset 并发数（全局，跨所有并发请求共享；也作为管理后台批量清理的 token 级默认值）
 asset_delete_concurrency = 50
-
-# ==================== 自动注册配置 ====================
-[register.browser]
-# 注册自动化引擎（drission / playwright）
-engine = 'drission'
-# 无头模式（不显示浏览器窗口）
-headless = false
-# 浏览器通道（msedge / chromium）
-channel = 'msedge'
-# 代理 URL（不填则复用 proxy.egress.proxy_url）
-proxy_url = ''
-# Chromium 可执行文件路径（Docker.reg 默认用环境变量 REGISTRATION_BROWSER_EXECUTABLE）
-executable_path = ''

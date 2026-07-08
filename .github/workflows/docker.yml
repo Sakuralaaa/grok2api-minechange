@@ -5,13 +5,14 @@ on:
     branches:
       - main
     tags:
-      - "v*"
+      - 'v*'
   pull_request:
     branches:
       - main
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -31,10 +32,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Normalize image name
-        shell: bash
-        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -43,8 +40,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Metadata for base image ──
-      - name: Extract metadata (base)
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -55,42 +51,14 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
 
-      # ── Metadata for reg image (append -reg to every tag) ──
-      - name: Extract metadata (reg)
-        id: meta-reg
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest-reg,enable=${{ github.ref_type == 'branch' }}
-            type=sha,prefix=sha-,suffix=-reg
-            type=ref,event=tag,suffix=-reg
-            type=semver,pattern={{version}},suffix=-reg
-
-      # ── Build base image (without registration) ──
-      - name: Build and push (base)
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=base
-          cache-to: type=gha,mode=max,scope=base
-          pull: true
-
-      # ── Build reg image (with Chromium + Playwright registration) ──
-      - name: Build and push (reg)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.reg
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-reg.outputs.tags }}
-          labels: ${{ steps.meta-reg.outputs.labels }}
-          cache-from: type=gha,scope=reg
-          cache-to: type=gha,mode=max,scope=reg
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           pull: true
