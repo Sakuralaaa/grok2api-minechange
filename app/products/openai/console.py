@@ -51,6 +51,7 @@ _DEFAULT_CONSOLE_USER_AGENT = (
 _DEFAULT_CONSOLE_BROWSER = "edge"
 
 _CONSOLE_MODEL_MAP: dict[str, str] = {
+    "grok-4.20-fast-console": "grok-4.20-0309-non-reasoning",
     "grok-4.20-0309-non-reasoning-console": "grok-4.20-0309-non-reasoning",
     "grok-4.20-0309-console": "grok-4.20-0309",
     "grok-4.20-0309-reasoning-console": "grok-4.20-0309-reasoning",
@@ -408,17 +409,35 @@ def _feedback_kind_for_status(status: int) -> FeedbackKind:
     return FeedbackKind.SERVER_ERROR
 
 
-def _console_status_message(status: int) -> str:
+def _console_status_message(
+    status: int,
+    *,
+    model: str | None = None,
+    upstream_model: str | None = None,
+) -> str:
+    if status == 404 and model == "grok-4.5-console":
+        return (
+            "Console model 'grok-4.5-console' upstream is currently unavailable "
+            "(404 from grok-4.5)."
+        )
     if status == 403:
         return (
             "Console upstream returned 403; console.x.ai requires a valid "
             "Cloudflare/browser session. Configure console.cf_cookies and "
             "console.user_agent from the same browser session."
         )
+    if model and upstream_model:
+        return f"Console upstream returned {status} for {model} ({upstream_model})"
     return f"Console upstream returned {status}"
 
 
-async def _post_console_json(token: str, payload: bytes, *, timeout_s: float) -> dict:
+async def _post_console_json(
+    token: str,
+    payload: bytes,
+    *,
+    timeout_s: float,
+    model: str,
+) -> dict:
     from app.control.proxy.models import ProxyFeedback, ProxyFeedbackKind
     from app.dataplane.proxy import get_proxy_runtime
 
@@ -449,7 +468,11 @@ async def _post_console_json(token: str, payload: bytes, *, timeout_s: float) ->
                     ),
                 )
                 raise UpstreamError(
-                    _console_status_message(response.status_code),
+                    _console_status_message(
+                        response.status_code,
+                        model=model,
+                        upstream_model=console_upstream_model(model),
+                    ),
                     status=response.status_code,
                     body=body,
                 )
@@ -474,6 +497,7 @@ async def _post_console_stream(
     payload: bytes,
     *,
     timeout_s: float,
+    model: str,
 ) -> AsyncGenerator[str, None]:
     from app.control.proxy.models import ProxyFeedback, ProxyFeedbackKind
     from app.dataplane.proxy import get_proxy_runtime
@@ -506,7 +530,11 @@ async def _post_console_stream(
             )
             await session.close()
             raise UpstreamError(
-                _console_status_message(response.status_code),
+                _console_status_message(
+                    response.status_code,
+                    model=model,
+                    upstream_model=console_upstream_model(model),
+                ),
                 status=response.status_code,
                 body=body,
             )
@@ -862,7 +890,12 @@ async def maybe_create_response(
         fail_exc: UpstreamError | None = None
         try:
             if stream:
-                upstream = await _post_console_stream(acct.token, payload, timeout_s=timeout_s)
+                upstream = await _post_console_stream(
+                    acct.token,
+                    payload,
+                    timeout_s=timeout_s,
+                    model=model,
+                )
 
                 async def _run_stream(lease=acct, upstream_lines=upstream):
                     nonlocal success, fail_exc
@@ -909,7 +942,12 @@ async def maybe_create_response(
 
                 return _run_stream()
 
-            obj = await _post_console_json(acct.token, payload, timeout_s=timeout_s)
+            obj = await _post_console_json(
+                acct.token,
+                payload,
+                timeout_s=timeout_s,
+                model=model,
+            )
             success = True
             return _normalize_response_model(
                 obj,

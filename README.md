@@ -244,6 +244,24 @@ docker compose up -d
 | `grok-4.20-heavy` | `heavy` | `heavy` |
 | `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
 
+### Console Chat
+
+Console 通道模型统一使用 `-console` 后缀，并尽量用模型名表达思考强度。`/v1/models` 默认只展示推荐短名；旧版 `0309-*`、`reasoning-console`、`multi-agent-*` 等别名仍兼容调用，但不再展示。
+
+| 模型名 | 上游模型 | 思考强度 |
+| :-- | :-- | :-- |
+| `grok-4.20-fast-console` | `grok-4.20-0309-non-reasoning` | 无固定 reasoning |
+| `grok-4.20-expert-console` | `grok-4.20-0309-reasoning` | expert |
+| `grok-4.3-low-console` | `grok-4.3` | low |
+| `grok-4.3-medium-console` | `grok-4.3` | medium |
+| `grok-4.3-high-console` | `grok-4.3` | high |
+| `grok-4.20-heavy-low-console` | `grok-4.20-multi-agent-0309` | low |
+| `grok-4.20-heavy-medium-console` | `grok-4.20-multi-agent-0309` | medium |
+| `grok-4.20-heavy-high-console` | `grok-4.20-multi-agent-0309` | high |
+| `grok-4.20-heavy-xhigh-console` | `grok-4.20-multi-agent-0309` | xhigh |
+| `grok-4.5-console` | `grok-4.5` | experimental |
+| `grok-build-console` | `grok-build-0.1` | 默认 |
+
 ### Image
 
 | 模型名 | mode | tier |

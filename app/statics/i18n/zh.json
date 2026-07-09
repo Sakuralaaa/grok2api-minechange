@@ -335,6 +335,7 @@
       "tabs": {
         "system": "系统配置",
         "features": "应用功能",
+        "console": "Console 通道",
         "schedule": "任务调度",
         "proxy": "网络代理",
         "cache": "缓存存储",
@@ -353,7 +354,9 @@
         "timeouts": "请求超时设置",
         "imageProtocol": "NSFW 与图像协议",
         "logging": "日志配置",
-        "localMediaCache": "本地媒体缓存"
+        "localMediaCache": "本地媒体缓存",
+        "accountCleanup": "删除账号清理",
+        "consoleResponses": "Console Responses"
       },
       "options": {
         "imageFormat": {
@@ -625,6 +628,46 @@
         "logMaxFiles": {
           "label": "日志保留天数",
           "desc": "按天轮转时最多保留的日志文件数量。默认 7。"
+        },
+        "deletedRetentionDays": {
+          "label": "保留天数",
+          "desc": "软删除账号保留多久后彻底清理；-1 表示不自动清理。"
+        },
+        "cleanupRunAt": {
+          "label": "每日执行时间",
+          "desc": "每天执行删除账号清理的本地时间，格式 HH:MM。"
+        },
+        "cleanupBatchSize": {
+          "label": "批次大小",
+          "desc": "每批最多彻底删除的账号数量。"
+        },
+        "cleanupVacuum": {
+          "label": "执行 VACUUM",
+          "desc": "SQLite 清理后压缩数据库文件；账号库较大时可能短暂占用 IO。"
+        },
+        "consoleResponsesUrl": {
+          "label": "Responses URL",
+          "desc": "console.x.ai Responses 端点地址。通常保持默认值。"
+        },
+        "consoleCluster": {
+          "label": "Console Cluster",
+          "desc": "xAI Console 转发集群地址。通常保持默认值。"
+        },
+        "consoleTeamId": {
+          "label": "Team ID",
+          "desc": "可选。填写后会生成 team chat-playground referer；留空使用 console 根路径。"
+        },
+        "consoleEnableSearchTools": {
+          "label": "默认启用搜索工具",
+          "desc": "Console 请求未显式传 tools 时，默认附带 web_search 和 x_search。"
+        },
+        "consoleUserAgent": {
+          "label": "User-Agent",
+          "desc": "Console 请求使用的浏览器 User-Agent。"
+        },
+        "consoleBrowser": {
+          "label": "浏览器指纹",
+          "desc": "curl_cffi 浏览器指纹，例如 edge。"
         }
       }
     }

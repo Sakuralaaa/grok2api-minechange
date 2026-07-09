@@ -497,6 +497,23 @@ const SCHEMA_DEF = [
     ]
   },
   {
+    id: 'console', label: 'Console 通道', labelKey: 'config.schema.tabs.console',
+    groups: [
+      {
+        title: 'Console Responses', titleKey: 'config.schema.groups.consoleResponses',
+        section: 'console',
+        fields: [
+          { key: 'responses_url', label: 'Responses URL', labelKey: 'config.schema.fields.consoleResponsesUrl.label', type: 'text', desc: 'console.x.ai Responses 端点地址。通常保持默认值。', descKey: 'config.schema.fields.consoleResponsesUrl.desc', wide: true },
+          { key: 'cluster', label: 'Console Cluster', labelKey: 'config.schema.fields.consoleCluster.label', type: 'text', desc: 'xAI Console 转发集群地址。通常保持默认值。', descKey: 'config.schema.fields.consoleCluster.desc', wide: true },
+          { key: 'team_id', label: 'Team ID', labelKey: 'config.schema.fields.consoleTeamId.label', type: 'text', desc: '可选。填写后会生成 team chat-playground referer；留空使用 console 根路径。', descKey: 'config.schema.fields.consoleTeamId.desc' },
+          { key: 'enable_search_tools', label: '默认启用搜索工具', labelKey: 'config.schema.fields.consoleEnableSearchTools.label', type: 'bool', desc: 'Console 请求未显式传 tools 时，默认附带 web_search 和 x_search。', descKey: 'config.schema.fields.consoleEnableSearchTools.desc' },
+          { key: 'user_agent', label: 'User-Agent', labelKey: 'config.schema.fields.consoleUserAgent.label', type: 'text', desc: 'Console 请求使用的浏览器 User-Agent。', descKey: 'config.schema.fields.consoleUserAgent.desc', wide: true },
+          { key: 'browser', label: '浏览器指纹', labelKey: 'config.schema.fields.consoleBrowser.label', type: 'text', desc: 'curl_cffi 浏览器指纹，例如 edge。', descKey: 'config.schema.fields.consoleBrowser.desc' },
+        ]
+      },
+    ]
+  },
+  {
     id: 'schedule', label: '任务调度', labelKey: 'config.schema.tabs.schedule',
     groups: [
       {
@@ -512,13 +529,13 @@ const SCHEMA_DEF = [
         ]
       },
       {
-        title: '??????', titleKey: 'config.schema.groups.accountCleanup',
+        title: '删除账号清理', titleKey: 'config.schema.groups.accountCleanup',
         section: 'account.cleanup',
         fields: [
-          { key: 'deleted_retention_days', label: '????', type: 'number', desc: '???????????? -1 ????????' },
-          { key: 'run_at', label: '??????', type: 'text', desc: '?????????????? HH:MM?' },
-          { key: 'batch_size', label: '??????', type: 'number', min: 1, desc: '???????????' },
-          { key: 'vacuum', label: '??? VACUUM', type: 'bool', desc: 'SQLite ??????????????????' },
+          { key: 'deleted_retention_days', label: '保留天数', labelKey: 'config.schema.fields.deletedRetentionDays.label', type: 'number', desc: '软删除账号保留多久后彻底清理；-1 表示不自动清理。', descKey: 'config.schema.fields.deletedRetentionDays.desc' },
+          { key: 'run_at', label: '每日执行时间', labelKey: 'config.schema.fields.cleanupRunAt.label', type: 'text', desc: '每天执行删除账号清理的本地时间，格式 HH:MM。', descKey: 'config.schema.fields.cleanupRunAt.desc' },
+          { key: 'batch_size', label: '批次大小', labelKey: 'config.schema.fields.cleanupBatchSize.label', type: 'number', min: 1, desc: '每批最多彻底删除的账号数量。', descKey: 'config.schema.fields.cleanupBatchSize.desc' },
+          { key: 'vacuum', label: '执行 VACUUM', labelKey: 'config.schema.fields.cleanupVacuum.label', type: 'bool', desc: 'SQLite 清理后压缩数据库文件；账号库较大时可能短暂占用 IO。', descKey: 'config.schema.fields.cleanupVacuum.desc' },
         ]
       },
       {

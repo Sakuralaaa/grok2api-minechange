@@ -36,10 +36,14 @@ _TAG_IMAGES = "OpenAI - Images"
 _TAG_VIDEOS = "OpenAI - Videos"
 _TAG_FILES = "OpenAI - Files"
 _MODEL_LIST_HIDDEN_ALIASES = frozenset({
+    "grok-4.20-0309-non-reasoning-console",
+    "grok-4.20-0309-console",
     "grok-4.20-0309-reasoning-console",
     "grok-4.20-reasoning-console",
+    "grok-4.3-console",
     "grok-4.3-beta-console",
     "grok-4.20-multi-agent-console",
+    "grok-4.20-heavy-console",
     "grok-4.20-multi-agent-0309-console",
     "grok-4.20-multi-agent-low-console",
     "grok-4.20-multi-agent-medium-console",

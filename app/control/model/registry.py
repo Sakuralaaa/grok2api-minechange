@@ -17,6 +17,7 @@ MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("grok-4.20-0309",                         ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309"),
     ModelSpec("grok-4.20-0309-reasoning",               ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning"),
     # Console-only aliases for Basic accounts; upstream names are mapped in app.products.openai.console.
+    ModelSpec("grok-4.20-fast-console",                     ModeId.CONSOLE,  Tier.BASIC, Capability.CONSOLE_CHAT,       True, "Grok 4.20 Fast Console"),
     ModelSpec("grok-4.20-0309-non-reasoning-console",       ModeId.CONSOLE,  Tier.BASIC, Capability.CONSOLE_CHAT,       True, "Grok 4.20 0309 Non-Reasoning Console"),
     ModelSpec("grok-4.20-0309-console",                     ModeId.CONSOLE,  Tier.BASIC, Capability.CONSOLE_CHAT,       True, "Grok 4.20 0309 Console"),
     ModelSpec("grok-4.20-0309-reasoning-console",           ModeId.CONSOLE,  Tier.BASIC, Capability.CONSOLE_CHAT,       True, "Grok 4.20 0309 Reasoning Console"),

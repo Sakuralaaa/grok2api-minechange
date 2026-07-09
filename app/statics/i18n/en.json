@@ -335,6 +335,7 @@
       "tabs": {
         "system": "System",
         "features": "Features",
+        "console": "Console",
         "schedule": "Scheduling",
         "proxy": "Networking",
         "cache": "Cache Storage",
@@ -353,7 +354,9 @@
         "timeouts": "Request Timeouts",
         "imageProtocol": "NSFW and Image Streaming",
         "logging": "Logging",
-        "localMediaCache": "Local Media Cache"
+        "localMediaCache": "Local Media Cache",
+        "accountCleanup": "Deleted Account Cleanup",
+        "consoleResponses": "Console Responses"
       },
       "options": {
         "imageFormat": {
@@ -625,6 +628,46 @@
         "logMaxFiles": {
           "label": "Log Retention (days)",
           "desc": "Maximum number of daily log files to keep during rotation. Default: 7."
+        },
+        "deletedRetentionDays": {
+          "label": "Retention Days",
+          "desc": "Number of days to retain soft-deleted accounts before purging them. Use -1 to disable automatic cleanup."
+        },
+        "cleanupRunAt": {
+          "label": "Daily Run Time",
+          "desc": "Local time for the daily deleted-account cleanup task, in HH:MM format."
+        },
+        "cleanupBatchSize": {
+          "label": "Batch Size",
+          "desc": "Maximum number of accounts to purge in each batch."
+        },
+        "cleanupVacuum": {
+          "label": "Run VACUUM",
+          "desc": "Compacts the SQLite database after cleanup. Large account databases may briefly consume extra I/O."
+        },
+        "consoleResponsesUrl": {
+          "label": "Responses URL",
+          "desc": "console.x.ai Responses endpoint. Usually keep the default value."
+        },
+        "consoleCluster": {
+          "label": "Console Cluster",
+          "desc": "xAI Console forwarding cluster URL. Usually keep the default value."
+        },
+        "consoleTeamId": {
+          "label": "Team ID",
+          "desc": "Optional. When set, requests use a team chat-playground referer; leave blank to use the console root."
+        },
+        "consoleEnableSearchTools": {
+          "label": "Enable Search Tools by Default",
+          "desc": "When a Console request does not explicitly provide tools, attach web_search and x_search by default."
+        },
+        "consoleUserAgent": {
+          "label": "User-Agent",
+          "desc": "Browser User-Agent used for Console requests."
+        },
+        "consoleBrowser": {
+          "label": "Browser Fingerprint",
+          "desc": "curl_cffi browser fingerprint, for example edge."
         }
       }
     }
