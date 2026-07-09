@@ -20,9 +20,9 @@ KEY_GROK_4_3 = "grok_4_3"
 KEY_MULTI_AGENT = "multi_agent"
 
 MODE_BY_KEY = {
-    KEY_REASONING: 5,
-    KEY_MULTI_AGENT: 5,
-    KEY_GROK_4_3: 5,
+    KEY_REASONING: 2,
+    KEY_MULTI_AGENT: 3,
+    KEY_GROK_4_3: 4,
 }
 
 LABEL_BY_KEY = {
@@ -33,7 +33,7 @@ LABEL_BY_KEY = {
 
 
 def console_usage_key_for_model(model: str) -> str:
-    if "4.3" in model:
+    if "4.3" in model or "4.5" in model:
         return KEY_GROK_4_3
     if "multi-agent" in model or "heavy" in model:
         return KEY_MULTI_AGENT

@@ -1,6 +1,7 @@
 """Shared account selection helpers for products-layer request handlers."""
 
 from app.control.model.enums import ModeId
+from app.control.account.console_usage import console_mode_id_for_model
 from app.control.model.spec import ModelSpec
 from app.control.account.runtime import get_refresh_service
 from app.dataplane.account.selector import current_strategy
@@ -32,6 +33,8 @@ def mode_candidates(spec: ModelSpec) -> tuple[int, ...]:
     account still has usable quota in the other chat windows.
     """
     primary = int(spec.mode_id)
+    if spec.is_console_chat():
+        return (console_mode_id_for_model(spec.model_name),)
     if (
         spec.is_chat()
         and spec.mode_id == ModeId.AUTO
