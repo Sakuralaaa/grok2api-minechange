@@ -7,14 +7,12 @@ CONFIG_SOURCE="${GROK2API_CONFIG_SOURCE:-/run/grok2api/config.yaml}"
 APP_CONFIG="/app/config.yaml"
 
 yaml_quote() {
-  # Emit a double-quoted YAML string (escape \ and ").
   value=$1
   value=$(printf '%s' "$value" | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '"%s"' "$value"
 }
 
 write_legacy_keys() {
-  # GROK2API_LEGACY_API_KEYS: comma-separated plain keys
   keys="${GROK2API_LEGACY_API_KEYS:-${LEGACY_API_KEYS:-}}"
   if [ -z "$keys" ]; then
     printf '  legacyAPIKeys: []\n'
@@ -23,7 +21,6 @@ write_legacy_keys() {
   printf '  legacyAPIKeys:\n'
   old_ifs=$IFS
   IFS=','
-  # shellcheck disable=SC2086
   set -- $keys
   IFS=$old_ifs
   for key in "$@"; do
@@ -34,6 +31,38 @@ write_legacy_keys() {
   done
 }
 
+write_database_block() {
+  db_driver="${GROK2API_DATABASE_DRIVER:-${DATABASE_DRIVER:-sqlite}}"
+  postgres_dsn="${GROK2API_POSTGRES_DSN:-${POSTGRES_DSN:-${DATABASE_URL:-}}}"
+  sqlite_path="${GROK2API_SQLITE_PATH:-/app/data/backend.db}"
+  max_open="${GROK2API_POSTGRES_MAX_OPEN_CONNS:-50}"
+  max_idle="${GROK2API_POSTGRES_MAX_IDLE_CONNS:-10}"
+  case "$db_driver" in
+    postgres|postgresql|pg)
+      if [ -z "$postgres_dsn" ]; then
+        echo "database.driver=postgres requires GROK2API_POSTGRES_DSN or DATABASE_URL" >&2
+        exit 1
+      fi
+      printf 'database:\n'
+      printf '  driver: postgres\n'
+      printf '  postgres:\n'
+      printf '    dsn: %s\n' "$(yaml_quote "$postgres_dsn")"
+      printf '    maxOpenConns: %s\n' "$max_open"
+      printf '    maxIdleConns: %s\n' "$max_idle"
+      ;;
+    sqlite|"")
+      printf 'database:\n'
+      printf '  driver: sqlite\n'
+      printf '  sqlite:\n'
+      printf '    path: %s\n' "$(yaml_quote "$sqlite_path")"
+      ;;
+    *)
+      echo "unsupported GROK2API_DATABASE_DRIVER=$db_driver (use sqlite or postgres)" >&2
+      exit 1
+      ;;
+  esac
+}
+
 generate_config_from_env() {
   jwt_secret="${GROK2API_JWT_SECRET:-${JWT_SECRET:-}}"
   enc_key="${GROK2API_CREDENTIAL_ENCRYPTION_KEY:-${CREDENTIAL_ENCRYPTION_KEY:-}}"
@@ -41,7 +70,6 @@ generate_config_from_env() {
   admin_pass="${GROK2API_ADMIN_PASSWORD:-${ADMIN_PASSWORD:-}}"
   public_url="${GROK2API_PUBLIC_API_BASE_URL:-${PUBLIC_API_BASE_URL:-}}"
   secure_cookies="${GROK2API_SECURE_COOKIES:-${SECURE_COOKIES:-}}"
-  sqlite_path="${GROK2API_SQLITE_PATH:-/app/data/backend.db}"
   media_path="${GROK2API_MEDIA_PATH:-/app/data/media}"
   static_path="${GROK2API_STATIC_PATH:-/app/frontend/dist}"
 
@@ -63,7 +91,6 @@ generate_config_from_env() {
       *) secure_cookies="false" ;;
     esac
   fi
-
   case "$secure_cookies" in
     1|true|TRUE|yes|YES|on|ON) secure_cookies="true" ;;
     *) secure_cookies="false" ;;
@@ -91,10 +118,7 @@ generate_config_from_env() {
     printf '  publicApiBaseURL: %s\n' "$(yaml_quote "$public_url")"
     printf '  staticPath: %s\n' "$(yaml_quote "$static_path")"
     printf '\n'
-    printf 'database:\n'
-    printf '  driver: sqlite\n'
-    printf '  sqlite:\n'
-    printf '    path: %s\n' "$(yaml_quote "$sqlite_path")"
+    write_database_block
     printf '\n'
     printf 'runtimeStore:\n'
     printf '  driver: memory\n'
@@ -143,7 +167,6 @@ elif [ -n "${GROK2API_CONFIG_YAML:-}" ]; then
   printf '%s\n' "$GROK2API_CONFIG_YAML" > "$APP_CONFIG"
   echo "loaded config from GROK2API_CONFIG_YAML env" >&2
 elif [ -n "${GROK2API_CONFIG_B64:-}" ]; then
-  # Alpine busybox base64 supports -d
   printf '%s' "$GROK2API_CONFIG_B64" | base64 -d > "$APP_CONFIG"
   echo "loaded config from GROK2API_CONFIG_B64 env" >&2
 else
@@ -153,7 +176,6 @@ fi
 chown grok2api:grok2api "$APP_CONFIG"
 chmod 0600 "$APP_CONFIG"
 
-# Ensure data dirs exist and are writable by runtime user.
 mkdir -p /app/data /app/data/media
 chown -R grok2api:grok2api /app/data 2>/dev/null || true
 
