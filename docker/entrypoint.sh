@@ -6,10 +6,26 @@ umask 077
 CONFIG_SOURCE="${GROK2API_CONFIG_SOURCE:-/run/grok2api/config.yaml}"
 APP_CONFIG="/app/config.yaml"
 
+log() { echo "[grok2api-entrypoint] $*" >&2; }
+
 yaml_quote() {
   value=$1
   value=$(printf '%s' "$value" | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '"%s"' "$value"
+}
+
+# Minimal URL-encode for DSN userinfo/path pieces (password-safe).
+urlencode() {
+  # shellcheck disable=SC2059
+  printf '%s' "$1" | awk '
+  BEGIN{for(i=0;i<256;i++) ord[sprintf("%c",i)]=i}
+  {
+    for(i=1;i<=length($0);i++){
+      c=substr($0,i,1)
+      if (c ~ /[A-Za-z0-9._~-]/) printf "%s", c
+      else printf "%%%02X", ord[c]
+    }
+  }'
 }
 
 write_legacy_keys() {
@@ -21,6 +37,7 @@ write_legacy_keys() {
   printf '  legacyAPIKeys:\n'
   old_ifs=$IFS
   IFS=','
+  # shellcheck disable=SC2086
   set -- $keys
   IFS=$old_ifs
   for key in "$@"; do
@@ -31,18 +48,65 @@ write_legacy_keys() {
   done
 }
 
+resolve_postgres_dsn() {
+  # Priority: explicit DSN envs, then Zeabur/compose split vars.
+  dsn="${GROK2API_POSTGRES_DSN:-${POSTGRES_DSN:-${DATABASE_URL:-${POSTGRES_CONNECTION_STRING:-}}}}"
+  if [ -n "$dsn" ]; then
+    # Normalize postgresql:// -> postgres://
+    case "$dsn" in
+      postgresql://*) dsn="postgres://${dsn#postgresql://}" ;;
+    esac
+    printf '%s' "$dsn"
+    return
+  fi
+
+  host="${GROK2API_POSTGRES_HOST:-${POSTGRES_HOST:-${PGHOST:-postgresql.zeabur.internal}}}"
+  port="${GROK2API_POSTGRES_PORT:-${POSTGRES_PORT:-${PGPORT:-5432}}}"
+  user="${GROK2API_POSTGRES_USER:-${POSTGRES_USER:-${POSTGRES_USERNAME:-${PGUSER:-}}}}"
+  pass="${GROK2API_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-${PGPASSWORD:-}}}"
+  db="${GROK2API_POSTGRES_DB:-${POSTGRES_DB:-${POSTGRES_DATABASE:-${PGDATABASE:-}}}}"
+  sslmode="${GROK2API_POSTGRES_SSLMODE:-${POSTGRES_SSLMODE:-disable}}"
+
+  if [ -z "$user" ] || [ -z "$pass" ] || [ -z "$db" ]; then
+    return 1
+  fi
+
+  user_enc=$(urlencode "$user")
+  pass_enc=$(urlencode "$pass")
+  db_enc=$(urlencode "$db")
+  printf 'postgres://%s:%s@%s:%s/%s?sslmode=%s' "$user_enc" "$pass_enc" "$host" "$port" "$db_enc" "$sslmode"
+}
+
 write_database_block() {
   db_driver="${GROK2API_DATABASE_DRIVER:-${DATABASE_DRIVER:-sqlite}}"
-  postgres_dsn="${GROK2API_POSTGRES_DSN:-${POSTGRES_DSN:-${DATABASE_URL:-}}}"
+  # auto-select postgres if DSN-like envs present and driver not forced
+  if [ "$db_driver" = "sqlite" ] || [ -z "$db_driver" ]; then
+    if [ -n "${GROK2API_POSTGRES_DSN:-${POSTGRES_DSN:-${DATABASE_URL:-${POSTGRES_CONNECTION_STRING:-}}}}" ] \
+      || [ -n "${POSTGRES_HOST:-${PGHOST:-}}" ]; then
+      # Only auto-switch if user explicitly asked via GROK2API_DATABASE_DRIVER=postgres OR left default and provided DSN.
+      if [ -n "${GROK2API_DATABASE_DRIVER:-}" ]; then
+        :
+      elif [ -n "${GROK2API_POSTGRES_DSN:-${POSTGRES_DSN:-${DATABASE_URL:-${POSTGRES_CONNECTION_STRING:-}}}}" ]; then
+        db_driver="postgres"
+      fi
+    fi
+  fi
+
   sqlite_path="${GROK2API_SQLITE_PATH:-/app/data/backend.db}"
   max_open="${GROK2API_POSTGRES_MAX_OPEN_CONNS:-50}"
   max_idle="${GROK2API_POSTGRES_MAX_IDLE_CONNS:-10}"
+
   case "$db_driver" in
     postgres|postgresql|pg)
-      if [ -z "$postgres_dsn" ]; then
-        echo "database.driver=postgres requires GROK2API_POSTGRES_DSN or DATABASE_URL" >&2
+      if ! postgres_dsn=$(resolve_postgres_dsn); then
+        log "ERROR: postgres selected but no DSN/credentials found"
+        log "Set GROK2API_POSTGRES_DSN=postgres://user:pass@postgresql.zeabur.internal:5432/db?sslmode=disable"
+        log "or POSTGRES_HOST/USER/PASSWORD/DB (Zeabur template vars)"
         exit 1
       fi
+      # redact password for logs
+      redacted=$(printf '%s' "$postgres_dsn" | sed -E 's#(postgres://[^:]+:)[^@]+@#\1***@#')
+      log "database=postgres dsn=$redacted"
       printf 'database:\n'
       printf '  driver: postgres\n'
       printf '  postgres:\n'
@@ -51,13 +115,14 @@ write_database_block() {
       printf '    maxIdleConns: %s\n' "$max_idle"
       ;;
     sqlite|"")
+      log "database=sqlite path=$sqlite_path"
       printf 'database:\n'
       printf '  driver: sqlite\n'
       printf '  sqlite:\n'
       printf '    path: %s\n' "$(yaml_quote "$sqlite_path")"
       ;;
     *)
-      echo "unsupported GROK2API_DATABASE_DRIVER=$db_driver (use sqlite or postgres)" >&2
+      log "ERROR: unsupported GROK2API_DATABASE_DRIVER=$db_driver (use sqlite or postgres)"
       exit 1
       ;;
   esac
@@ -79,11 +144,18 @@ generate_config_from_env() {
   [ -n "$admin_pass" ] || missing="$missing GROK2API_ADMIN_PASSWORD"
   [ -n "$public_url" ] || missing="$missing GROK2API_PUBLIC_API_BASE_URL"
   if [ -n "$missing" ]; then
-    echo "missing config file and required env vars:$missing" >&2
-    echo "Either mount config.yaml to ${CONFIG_SOURCE}" >&2
-    echo "or set env vars for Zeabur-style deploy (see docs/MIGRATION-GO-CONSOLE.md)." >&2
+    log "ERROR: missing required env vars:$missing"
+    log "Also check Variable names are exact (case-sensitive)."
     exit 1
   fi
+
+  case "$public_url" in
+    http://*|https://*|HTTP://*|HTTPS://*) ;;
+    *)
+      log "ERROR: GROK2API_PUBLIC_API_BASE_URL must start with http:// or https:// (got: $public_url)"
+      exit 1
+      ;;
+  esac
 
   if [ -z "$secure_cookies" ]; then
     case "$public_url" in
@@ -97,6 +169,7 @@ generate_config_from_env() {
   esac
 
   mkdir -p /app/data /app/data/media
+  log "publicApiBaseURL=$public_url secureCookies=$secure_cookies"
 
   {
     printf 'server:\n'
@@ -157,26 +230,29 @@ generate_config_from_env() {
     printf '    streamHeartbeatInterval: 15\n'
   } > "$APP_CONFIG"
 
-  echo "generated config from environment variables -> ${APP_CONFIG}" >&2
+  log "generated config from env -> $APP_CONFIG"
 }
 
-if [ -f "$CONFIG_SOURCE" ]; then
+log "starting entrypoint"
+log "image expects port 8000; set Zeabur container port = 8000"
+
+if [ -f "$CONFIG_SOURCE" ] && [ -s "$CONFIG_SOURCE" ]; then
   cp "$CONFIG_SOURCE" "$APP_CONFIG"
-  echo "loaded config from ${CONFIG_SOURCE}" >&2
+  log "loaded config file $CONFIG_SOURCE"
 elif [ -n "${GROK2API_CONFIG_YAML:-}" ]; then
   printf '%s\n' "$GROK2API_CONFIG_YAML" > "$APP_CONFIG"
-  echo "loaded config from GROK2API_CONFIG_YAML env" >&2
+  log "loaded GROK2API_CONFIG_YAML"
 elif [ -n "${GROK2API_CONFIG_B64:-}" ]; then
   printf '%s' "$GROK2API_CONFIG_B64" | base64 -d > "$APP_CONFIG"
-  echo "loaded config from GROK2API_CONFIG_B64 env" >&2
+  log "loaded GROK2API_CONFIG_B64"
 else
   generate_config_from_env
 fi
 
 chown grok2api:grok2api "$APP_CONFIG"
 chmod 0600 "$APP_CONFIG"
-
 mkdir -p /app/data /app/data/media
 chown -R grok2api:grok2api /app/data 2>/dev/null || true
 
+log "exec: $*"
 exec su-exec grok2api:grok2api "$@"
