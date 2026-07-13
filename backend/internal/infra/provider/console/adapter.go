@@ -214,12 +214,6 @@ func (a *Adapter) enrichConsoleBody(body []byte, publicID, upstreamModel string,
 		return nil, fmt.Errorf("invalid console request body: %w", err)
 	}
 	spec, ok := ResolvePublic(publicID)
-	if !ok {
-		if resolved, found := ResolveUpstream(upstreamModel); found {
-			spec = resolved
-			ok = true
-		}
-	}
 	modelName := upstreamModel
 	if ok && spec.UpstreamModel != "" {
 		modelName = spec.UpstreamModel
@@ -228,10 +222,14 @@ func (a *Adapter) enrichConsoleBody(body []byte, publicID, upstreamModel string,
 	payload["store"] = false
 	payload["stream"] = streaming
 
-	if ok && spec.Effort != "" && spec.Effort != "expert" && spec.Effort != "experimental" {
-		payload["reasoning"] = map[string]any{"effort": mapEffort(spec.Effort)}
-	} else if raw, exists := payload["reasoning"]; !exists || raw == nil {
-		// keep client reasoning when present
+	if consoleModelSupportsReasoning(modelName) {
+		effort := payloadReasoningEffort(payload)
+		if ok && spec.Effort != "" {
+			effort = spec.Effort
+		}
+		payload["reasoning"] = map[string]any{"effort": mapEffort(effort)}
+	} else {
+		delete(payload, "reasoning")
 	}
 
 	if cfg.EnableSearchTools {
@@ -245,6 +243,27 @@ func (a *Adapter) enrichConsoleBody(body []byte, publicID, upstreamModel string,
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func consoleModelSupportsReasoning(modelName string) bool {
+	switch strings.TrimSpace(modelName) {
+	case "grok-4.3", "grok-4.5", "grok-4.20-multi-agent-0309":
+		return true
+	default:
+		return false
+	}
+}
+
+func payloadReasoningEffort(payload map[string]any) string {
+	reasoning, ok := payload["reasoning"].(map[string]any)
+	if !ok {
+		return "medium"
+	}
+	effort, _ := reasoning["effort"].(string)
+	if strings.TrimSpace(effort) == "" {
+		return "medium"
+	}
+	return effort
 }
 
 func mapEffort(value string) string {

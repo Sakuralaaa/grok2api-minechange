@@ -27,7 +27,7 @@ var catalog = []ModelSpec{
 	{PublicID: "grok-4.20-heavy-medium-console", UpstreamModel: "grok-4.20-multi-agent-0309", Effort: "medium", Listed: true},
 	{PublicID: "grok-4.20-heavy-high-console", UpstreamModel: "grok-4.20-multi-agent-0309", Effort: "high", Listed: true},
 	{PublicID: "grok-4.20-heavy-xhigh-console", UpstreamModel: "grok-4.20-multi-agent-0309", Effort: "xhigh", Listed: true},
-	{PublicID: "grok-4.5-console", UpstreamModel: "grok-4.5", Effort: "experimental", Listed: true},
+	{PublicID: "grok-4.5-console", UpstreamModel: "grok-4.5", Listed: true},
 	{PublicID: "grok-build-console", UpstreamModel: "grok-build-0.1", Listed: true},
 
 	// Legacy aliases (callable, not listed)
