@@ -957,7 +957,8 @@ function BuildQuota({ quota, billing, locale }: { quota: QuotaDTO; billing?: Bil
 
 const visibleWebQuotaModes = ["auto", "fast", "expert", "heavy"] as const;
 
-function WebQuota({
+function WebQuota({ windows, locale, tier }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string; tier?: AccountDTO["webTier"] }) {
+  const { t } = useTranslation();
   const consoleWindow = windows.find((window) => window.mode === "console");
   if (consoleWindow) {
     const total = Math.max(consoleWindow.total || 0, 0);
@@ -969,7 +970,7 @@ function WebQuota({
       <div className="min-w-[10rem] space-y-1">
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="font-medium">{t("accounts.consoleQuota")}</span>
-          <span className="tabular-nums text-muted-foreground">{remaining}/{total || "—"}</span>
+          <span className="tabular-nums text-muted-foreground">{remaining}/{total || "-"}</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${percent}%` }} />
@@ -978,8 +979,6 @@ function WebQuota({
       </div>
     );
   }
- windows, locale, tier }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string; tier?: AccountDTO["webTier"] }) {
-  const { t } = useTranslation();
   if (windows.length === 0) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
   const windowsByMode = new Map(windows.map((window) => [window.mode, window]));
   const weekly = windowsByMode.get("weekly");

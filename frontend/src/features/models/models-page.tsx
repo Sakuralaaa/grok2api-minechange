@@ -217,7 +217,7 @@ export function ModelsPage() {
                 { id: "provider", label: t("models.provider"), value: providerFilter, onChange: (value) => { setProviderFilter(value as "grok_build" | "grok_web" | "grok_console" | ""); setPage(1); }, options: [
                   { value: "grok_build", label: t("models.providerGrokBuild") },
                   { value: "grok_web", label: t("models.providerGrokWeb") },
-    { value: "grok_console", label: "Grok Console" },
+    { value: "grok_console", label: t("models.providerGrokConsole") },
                 ] },
                 { id: "status", label: t("models.status"), value: statusFilter, onChange: (value) => { setStatusFilter(value); setPage(1); }, options: [
                   { value: "enabled", label: t("common.enabled") },
