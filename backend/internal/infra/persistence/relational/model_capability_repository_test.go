@@ -41,7 +41,7 @@ func TestModelCapabilitiesAggregateAndGateEnabledRoutes(t *testing.T) {
 	if err != nil || len(beforeSync) != 0 {
 		t.Fatalf("before sync = %#v, err = %v", beforeSync, err)
 	}
-	adminBeforeSync, totalBeforeSync, err := models.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Limit: 20}})
+	adminBeforeSync, totalBeforeSync, err := models.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Limit: 20}, Filter: repository.ModelListFilter{AvailableOnly: true}})
 	if err != nil || totalBeforeSync != 0 || len(adminBeforeSync) != 0 {
 		t.Fatalf("admin list before sync = %#v, total = %d, err = %v", adminBeforeSync, totalBeforeSync, err)
 	}

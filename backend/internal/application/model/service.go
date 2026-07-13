@@ -91,7 +91,7 @@ func (s *Service) List(ctx context.Context, page, pageSize int, search string, f
 		value := filter.Status == "enabled"
 		enabled = &value
 	}
-	return s.models.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Offset: (page - 1) * pageSize, Limit: pageSize, Search: search, Sort: filter.Sort}, Filter: repository.ModelListFilter{Provider: filter.Provider, Enabled: enabled}})
+	return s.models.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Offset: (page - 1) * pageSize, Limit: pageSize, Search: search, Sort: filter.Sort}, Filter: repository.ModelListFilter{Provider: filter.Provider, Enabled: enabled, AvailableOnly: true}})
 }
 
 func validModelFilter(value string, allowed ...string) bool {

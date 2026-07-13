@@ -50,7 +50,10 @@ func NewModelRepository(db *Database) *ModelRepository { return &ModelRepository
 
 func (r *ModelRepository) List(ctx context.Context, input repository.ModelListQuery) ([]model.Route, int64, error) {
 	var total int64
-	query := r.availableRoutes(r.db.db.WithContext(ctx).Model(&modelRouteModel{}))
+	query := r.db.db.WithContext(ctx).Model(&modelRouteModel{})
+	if input.Filter.AvailableOnly {
+		query = r.availableRoutes(query)
+	}
 	if search := strings.TrimSpace(input.Page.Search); search != "" {
 		pattern := "%" + strings.ToLower(search) + "%"
 		query = query.Where("LOWER(public_id) LIKE ? OR LOWER(upstream_model) LIKE ?", pattern, pattern)

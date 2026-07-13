@@ -63,8 +63,9 @@ type AccountSummary struct {
 }
 
 type ModelListFilter struct {
-	Provider string
-	Enabled  *bool
+	Provider      string
+	Enabled       *bool
+	AvailableOnly bool
 }
 
 type ModelListQuery struct {
