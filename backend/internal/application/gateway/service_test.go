@@ -71,7 +71,7 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 	clientService := clientkeyapp.NewService(nil, nil, nil, 60, 4, nil)
 	selector := NewSelector(accountRepo, concurrency, sticky, registry, time.Hour, time.Second, time.Minute)
 	service := NewService(modelRepo, auditRepo, accountService, clientService, registry, selector, responseRepo, 3)
-	result, err := service.CreateResponse(ctx, Input{RequestID: "req-1", ClientKey: clientKey, PublicModel: "grok-test", Body: []byte(`{"model":"grok-test"}`)})
+	result, err := service.CreateResponse(ctx, Input{RequestID: "req-1", ClientKey: clientKey, PublicModel: "grok-test-build", Body: []byte(`{"model":"grok-test-build"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 		t.Fatalf("observed account = %#v, err = %v", observedAccount, err)
 	}
 	logs, total, err := auditRepo.List(ctx, 0, 10)
-	if err != nil || total != 1 || logs[0].AccountID == nil || *logs[0].AccountID != second.ID || logs[0].ClientKeyName != "test-key" || logs[0].ModelPublicID != "grok-test" || logs[0].ModelUpstreamModel != "grok-test" || logs[0].AccountName != "second" || logs[0].CachedInputTokens != 80 {
+	if err != nil || total != 1 || logs[0].AccountID == nil || *logs[0].AccountID != second.ID || logs[0].ClientKeyName != "test-key" || logs[0].ModelPublicID != "grok-test-build" || logs[0].ModelUpstreamModel != "grok-test" || logs[0].AccountName != "second" || logs[0].CachedInputTokens != 80 {
 		t.Fatalf("audit = %#v, %d, %v", logs, total, err)
 	}
 	ownership, err := responseRepo.Get(ctx, "resp-test", clientKey.ID, time.Now().UTC())
@@ -101,7 +101,7 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 	}
 
 	adapter.resetAttempts()
-	continued, err := service.CreateResponse(ctx, Input{RequestID: "req-2", ClientKey: clientKey, PublicModel: "grok-test", PreviousResponseID: "resp-test", Body: []byte(`{"model":"grok-test","previous_response_id":"resp-test"}`)})
+	continued, err := service.CreateResponse(ctx, Input{RequestID: "req-2", ClientKey: clientKey, PublicModel: "grok-test-build", PreviousResponseID: "resp-test", Body: []byte(`{"model":"grok-test-build","previous_response_id":"resp-test"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestGatewayPreservesRepeatedSystemicForbiddenWithoutCoolingAccounts(t *test
 	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 3)
 
 	_, err = service.CreateResponse(ctx, Input{
-		RequestID: "req-systemic-403", ClientKey: clientKey, PublicModel: "grok-systemic",
+		RequestID: "req-systemic-403", ClientKey: clientKey, PublicModel: "grok-systemic-build",
 		Body: []byte(`{"model":"grok-systemic","input":"hello"}`),
 	})
 	var upstreamFailure *UpstreamFailure
@@ -282,7 +282,7 @@ func TestGatewayRefreshesAndRetriesBuildPermissionDenialOnce(t *testing.T) {
 	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 2)
 
 	result, err := service.CreateResponse(ctx, Input{
-		RequestID: "req-rescue", ClientKey: clientKey, PublicModel: "grok-rescue",
+		RequestID: "req-rescue", ClientKey: clientKey, PublicModel: "grok-rescue-build",
 		Body: []byte(`{"model":"grok-rescue","input":"hello"}`),
 	})
 	if err != nil {
@@ -353,7 +353,7 @@ func TestWebRateLimitExhaustsOnlyRequestedQuotaMode(t *testing.T) {
 	accountService.SetQuotaRecoveryQueue(memory.NewQuotaRecoveryQueue())
 	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
 	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 1)
-	if _, err := service.CreateResponse(ctx, Input{RequestID: "req-web-429", ClientKey: key, PublicModel: "grok-web-test", Body: []byte(`{"model":"grok-web-test"}`)}); err == nil {
+	if _, err := service.CreateResponse(ctx, Input{RequestID: "req-web-429", ClientKey: key, PublicModel: "grok-web-test-web", Body: []byte(`{"model":"grok-web-test-web"}`)}); err == nil {
 		t.Fatal("expected rate-limited request to fail")
 	}
 	windows, err := accountRepo.GetQuotaWindows(ctx, []uint64{credential.ID})

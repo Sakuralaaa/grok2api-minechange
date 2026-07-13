@@ -703,7 +703,7 @@ func (s *Service) persistImportedSeeds(ctx context.Context, seeds []provider.Cre
 		if err != nil {
 			return ImportResult{}, err
 		}
-		for _, value := range stored {
+		for index, value := range stored {
 			result.AccountIDs = append(result.AccountIDs, value.ID)
 			if observer != nil {
 				if err := observer(value.ID); err != nil {
@@ -716,7 +716,7 @@ func (s *Service) persistImportedSeeds(ctx context.Context, seeds []provider.Cre
 					return ImportResult{}, err
 				}
 			}
-			providerKey := string(value.Provider)
+			providerKey := string(values[index].Provider)
 			pc := result.ByProvider[providerKey]
 			if value.Created {
 				result.Created++

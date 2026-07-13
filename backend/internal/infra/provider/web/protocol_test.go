@@ -40,7 +40,7 @@ func TestCatalogMatchesSupportedSurface(t *testing.T) {
 		publicIDs[value.PublicID] = struct{}{}
 		upstreamIDs[value.UpstreamModel] = struct{}{}
 	}
-	for _, required := range []string{"grok-chat-fast", "grok-chat-auto", "grok-chat-expert", "grok-chat-heavy", "grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-image-edit", "grok-imagine-video"} {
+	for _, required := range []string{"grok-chat-fast-web", "grok-chat-auto-web", "grok-chat-expert-web", "grok-chat-heavy-web", "grok-imagine-image-web", "grok-imagine-image-quality-web", "grok-imagine-image-edit-web", "grok-imagine-video-web"} {
 		if _, exists := publicIDs[required]; !exists {
 			t.Fatalf("missing supported model: %s", required)
 		}

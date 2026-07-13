@@ -13,7 +13,6 @@ import { getSystemInfo } from "@/entities/system/system-api";
 import { runtimeConfig } from "@/shared/config/runtime-config";
 import { copyToClipboard } from "@/shared/clipboard";
 import { cn } from "@/shared/lib/cn";
-import { channelBadgeClass, copyText } from "@/shared/lib/channel";
 
 type ExampleLanguage = "curl" | "python" | "javascript";
 type ExampleView = "request" | "response";

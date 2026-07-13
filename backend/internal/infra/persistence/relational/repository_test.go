@@ -325,7 +325,7 @@ func TestForeignKeysCascadeRuntimeStateButPreserveAuditHistory(t *testing.T) {
 	if err := models.ReplaceAccountCapabilities(ctx, accountValue.ID, []string{"grok-cascade"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	route, err := models.GetByPublicID(ctx, "grok-cascade")
+	route, err := models.GetByPublicID(ctx, "grok-cascade-build")
 	if err != nil {
 		t.Fatal(err)
 	}

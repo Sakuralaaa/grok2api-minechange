@@ -439,9 +439,9 @@ func toEditable(cfg config.Config) EditableConfig {
 			UserAgent: cfg.Provider.Build.UserAgent,
 		},
 		ProviderConsole: ProviderConsoleConfig{
-			ResponsesURL: value.Provider.Console.ResponsesURL, Cluster: value.Provider.Console.Cluster, TeamID: value.Provider.Console.TeamID,
-			UserAgent: value.Provider.Console.UserAgent, EnableSearchTools: value.Provider.Console.EnableSearchTools,
-			TimeoutSeconds: value.Provider.Console.TimeoutSeconds, QuotaLimit: value.Provider.Console.QuotaLimit, QuotaWindowSeconds: value.Provider.Console.QuotaWindowSeconds, StreamHeartbeatInterval: value.Provider.Console.StreamHeartbeatInterval,
+			ResponsesURL: cfg.Provider.Console.ResponsesURL, Cluster: cfg.Provider.Console.Cluster, TeamID: cfg.Provider.Console.TeamID,
+			UserAgent: cfg.Provider.Console.UserAgent, EnableSearchTools: cfg.Provider.Console.EnableSearchTools,
+			TimeoutSeconds: cfg.Provider.Console.TimeoutSeconds, QuotaLimit: cfg.Provider.Console.QuotaLimit, QuotaWindowSeconds: cfg.Provider.Console.QuotaWindowSeconds, StreamHeartbeatInterval: cfg.Provider.Console.StreamHeartbeatInterval,
 		},
 		ProviderWeb: ProviderWebConfig{
 			BaseURL: cfg.Provider.Web.BaseURL, QuotaTimeout: cfg.Provider.Web.QuotaTimeout.String(),

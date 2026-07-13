@@ -69,7 +69,7 @@ func TestModelCapabilitiesAggregateAndGateEnabledRoutes(t *testing.T) {
 	if err := models.MarkAccountCapabilitySyncFailed(ctx, second.ID, now.Add(30*time.Second), "temporary failure"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := models.GetByPublicID(ctx, "grok-premium"); err != nil {
+	if _, err := models.GetByPublicID(ctx, "grok-premium-build"); err != nil {
 		t.Fatalf("last successful capability must survive a failed refresh: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestModelCapabilitiesAggregateAndGateEnabledRoutes(t *testing.T) {
 	if err != nil || len(enabled) != 1 || enabled[0].UpstreamModel != "grok-basic" {
 		t.Fatalf("enabled = %#v, err = %v", enabled, err)
 	}
-	if _, err := models.GetByPublicID(ctx, "grok-premium"); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := models.GetByPublicID(ctx, "grok-premium-build"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("premium route err = %v", err)
 	}
 }
@@ -102,7 +102,7 @@ func TestReplaceProviderRoutesReconcilesStaticCatalog(t *testing.T) {
 	}
 
 	if err := repo.UpsertRoutes(ctx, []model.Route{
-		{PublicID: "grok-chat-fast", Provider: account.ProviderWeb, UpstreamModel: "fast", Capability: model.CapabilityChat, Enabled: false},
+		{PublicID: "grok-chat-fast-web", Provider: account.ProviderWeb, UpstreamModel: "fast", Capability: model.CapabilityChat, Enabled: false},
 		{PublicID: "old-obsolete", Provider: account.ProviderWeb, UpstreamModel: "obsolete", Capability: model.CapabilityChat, Enabled: true},
 		{PublicID: "build-model", Provider: account.ProviderBuild, UpstreamModel: "build-model", Capability: model.CapabilityResponses, Enabled: true},
 	}); err != nil {
@@ -117,7 +117,7 @@ func TestReplaceProviderRoutesReconcilesStaticCatalog(t *testing.T) {
 	}
 
 	if err := repo.ReplaceProviderRoutes(ctx, account.ProviderWeb, []model.Route{
-		{PublicID: "grok-chat-fast", Provider: account.ProviderWeb, UpstreamModel: "grok-chat-fast", Capability: model.CapabilityChat, Enabled: true},
+		{PublicID: "grok-chat-fast-web", Provider: account.ProviderWeb, UpstreamModel: "grok-chat-fast", Capability: model.CapabilityChat, Enabled: true},
 		{PublicID: "grok-chat-auto", Provider: account.ProviderWeb, UpstreamModel: "grok-chat-auto", Capability: model.CapabilityChat, Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestReplaceProviderRoutesReconcilesStaticCatalog(t *testing.T) {
 	if len(routes) != 2 || routes[0].UpstreamModel != "grok-chat-auto" || routes[1].UpstreamModel != "grok-chat-fast" {
 		t.Fatalf("web routes = %#v", routes)
 	}
-	if routes[1].ID != fastBefore.ID || routes[1].PublicID != "grok-chat-fast" || routes[1].Enabled {
+	if routes[1].ID != fastBefore.ID || routes[1].PublicID != "grok-chat-fast-web" || routes[1].Enabled {
 		t.Fatalf("reconciled fast route = %#v", routes[1])
 	}
 	var capability accountModelCapabilityModel
@@ -237,11 +237,12 @@ func TestManualModelRouteBindingsAndRediscovery(t *testing.T) {
 	if err := models.UpsertDiscovered(ctx, account.ProviderBuild, []string{created.UpstreamModel}); err != nil {
 		t.Fatal(err)
 	}
-	recreated, err := models.GetByPublicID(ctx, created.UpstreamModel)
+	expectedPublicID := model.EnsurePublicSuffix(created.UpstreamModel, account.ProviderBuild)
+	recreated, err := models.GetByPublicID(ctx, expectedPublicID)
 	if err != nil {
 		t.Fatalf("deleted route was not rediscovered: %v", err)
 	}
-	if recreated.ID == created.ID || recreated.PublicID != created.UpstreamModel || recreated.Origin != model.OriginDiscovered || len(recreated.BoundAccountIDs) != 0 {
+	if recreated.ID == created.ID || recreated.PublicID != expectedPublicID || recreated.Origin != model.OriginDiscovered || len(recreated.BoundAccountIDs) != 0 {
 		t.Fatalf("recreated route = %#v", recreated)
 	}
 }
@@ -258,7 +259,7 @@ func TestManualWebRouteSurvivesCatalogReconciliation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.ReplaceProviderRoutes(ctx, account.ProviderWeb, []model.Route{{
-		PublicID: "grok-chat-fast", Provider: account.ProviderWeb, UpstreamModel: "grok-chat-fast",
+		PublicID: "grok-chat-fast-web", Provider: account.ProviderWeb, UpstreamModel: "grok-chat-fast",
 		Capability: model.CapabilityChat, Enabled: true,
 	}}); err != nil {
 		t.Fatal(err)
@@ -310,7 +311,7 @@ func TestWebRediscoveryRestoresCatalogRouteDefaults(t *testing.T) {
 	database := openTestDatabase(t)
 	repo := NewModelRepository(database)
 	value, err := repo.Create(ctx, model.Route{
-		PublicID: "grok-imagine-image-edit", Provider: account.ProviderWeb, UpstreamModel: "imagine-image-edit",
+		PublicID: "grok-imagine-image-edit-web", Provider: account.ProviderWeb, UpstreamModel: "imagine-image-edit",
 		Capability: model.CapabilityImageEdit, Enabled: true,
 	}, nil)
 	if err != nil {
@@ -322,11 +323,12 @@ func TestWebRediscoveryRestoresCatalogRouteDefaults(t *testing.T) {
 	if err := repo.UpsertDiscovered(ctx, account.ProviderWeb, []string{value.UpstreamModel}); err != nil {
 		t.Fatal(err)
 	}
+	expectedPublicID := model.EnsurePublicSuffix("grok-imagine-image-edit", account.ProviderWeb)
 	items, total, err := repo.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Limit: 10, Search: value.UpstreamModel}})
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("rediscovered web route = %#v, total=%d, err=%v", items, total, err)
 	}
-	if items[0].PublicID != value.PublicID || items[0].Capability != model.CapabilityImageEdit || items[0].Origin != model.OriginDiscovered {
+	if items[0].PublicID != expectedPublicID || items[0].Capability != model.CapabilityImageEdit || items[0].Origin != model.OriginDiscovered {
 		t.Fatalf("rediscovered web route defaults = %#v", items[0])
 	}
 }
