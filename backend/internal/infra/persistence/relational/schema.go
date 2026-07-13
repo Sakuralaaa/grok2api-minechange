@@ -3,6 +3,8 @@ package relational
 import (
 	"context"
 	"fmt"
+
+	"gorm.io/gorm"
 )
 
 var schemaModels = []any{
@@ -76,9 +78,34 @@ func (d *Database) InitializeSchema(ctx context.Context) error {
 	if err := db.AutoMigrate(schemaModels...); err != nil {
 		return fmt.Errorf("初始化数据库表: %w", err)
 	}
+	if err := applyPostgresProviderConstraintMigration(db); err != nil {
+		return fmt.Errorf("升级 provider 检查约束: %w", err)
+	}
 	for _, statement := range schemaIndexes {
 		if err := db.Exec(statement).Error; err != nil {
 			return fmt.Errorf("初始化数据库索引: %w", err)
+		}
+	}
+	return nil
+}
+
+func applyPostgresProviderConstraintMigration(db *gorm.DB) error {
+	if db.Dialector.Name() != "postgres" {
+		return nil
+	}
+	statements := []string{
+		"ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS chk_accounts_provider",
+		"ALTER TABLE provider_accounts ADD CONSTRAINT chk_accounts_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
+		"ALTER TABLE model_routes DROP CONSTRAINT IF EXISTS chk_model_routes_provider",
+		"ALTER TABLE model_routes ADD CONSTRAINT chk_model_routes_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
+		"ALTER TABLE request_audits DROP CONSTRAINT IF EXISTS chk_request_audits_provider",
+		"ALTER TABLE request_audits ADD CONSTRAINT chk_request_audits_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
+		"ALTER TABLE response_ownership DROP CONSTRAINT IF EXISTS chk_response_ownership_provider",
+		"ALTER TABLE response_ownership ADD CONSTRAINT chk_response_ownership_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			return err
 		}
 	}
 	return nil
