@@ -48,6 +48,36 @@ provider:
 
 Console 默认注入合成 thinking 摘要（「已深度思考。」），兼容依赖思考 UI 的客户端；响应 `model` 字段回写带 `-console` 的 PublicID。
 
+## Zeabur 仅环境变量部署（推荐）
+
+不必挂载 `config.yaml`。只需：
+
+1. **镜像**：`ghcr.io/sakuralaaa/grok2api-minechange:latest`
+2. **端口**：`8000`
+3. **数据卷**：挂载到 `/app/data`
+4. **环境变量**（必填）：
+
+| 变量 | 说明 |
+| --- | --- |
+| `GROK2API_JWT_SECRET` | ≥32 字符，`openssl rand -hex 32` |
+| `GROK2API_CREDENTIAL_ENCRYPTION_KEY` | Base64 的 32 字节，`openssl rand -base64 32` |
+| `GROK2API_ADMIN_PASSWORD` | 首次管理员密码 |
+| `GROK2API_PUBLIC_API_BASE_URL` | 公网地址，如 `https://xxx.zeabur.app` |
+
+可选：
+
+| 变量 | 说明 |
+| --- | --- |
+| `GROK2API_ADMIN_USERNAME` | 默认 `admin` |
+| `GROK2API_LEGACY_API_KEYS` | 旧明文 API Key，逗号分隔 |
+| `GROK2API_SECURE_COOKIES` | 默认：HTTPS 自动 `true` |
+| `GROK2API_CONFIG_YAML` | 整份 YAML 字符串（进阶） |
+| `GROK2API_CONFIG_B64` | 整份 YAML 的 base64（进阶） |
+
+仍支持挂载文件到 `/run/grok2api/config.yaml`（优先于环境变量生成）。
+
+健康检查：`GET /healthz`
+
 ## Zeabur / VPS 切流
 
 1. 备份现网 `data/` 与 `config.yaml`。
