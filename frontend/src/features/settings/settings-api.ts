@@ -33,16 +33,19 @@ export type SettingsConfigDTO = {
 export type EgressNodeDTO = {
   id: string; name: string; scope: EgressScope; enabled: boolean;
   proxyConfigured: boolean; userAgent: string; cookieConfigured: boolean;
+  flareSolverrConfigured: boolean; lastClearanceAt?: string;
   health: number; failureCount: number; cooldownUntil?: string; lastError?: string;
 };
 
 export type EgressNodeInput = {
   name: string; scope: EgressScope; enabled: boolean; proxyURL?: string;
   clearProxyURL?: boolean; userAgent: string; cloudflareCookies?: string; clearCookies?: boolean;
+  flareSolverrURL?: string; clearFlareSolverr?: boolean;
 };
 
-export type EgressScope = "grok_build" | "grok_web" | "grok_console" | "grok_web_asset";
+export type EgressScope = "global" | "grok_build" | "grok_web" | "grok_console" | "grok_web_asset";
 export type EgressNodeListDTO = { items: EgressNodeDTO[]; defaultUserAgents: Record<EgressScope, string> };
+export type EgressProbeDTO = { proxyConnected: boolean; statusCode: number; latencyMS: number; clearanceRefreshed: boolean; message: string };
 
 export type SettingsSnapshotDTO = {
   config: SettingsConfigDTO;
@@ -80,4 +83,12 @@ export function updateEgressNode(id: string, input: EgressNodeInput): Promise<Eg
 
 export function deleteEgressNode(id: string): Promise<{ deleted: boolean }> {
   return apiRequest<{ deleted: boolean }>(`/api/admin/v1/egress-nodes/${id}`, { method: "DELETE" });
+}
+
+export function testEgressNode(id: string): Promise<EgressProbeDTO> {
+  return apiRequest<EgressProbeDTO>(`/api/admin/v1/egress-nodes/${id}/test`, { method: "POST" });
+}
+
+export function refreshEgressClearance(id: string): Promise<EgressProbeDTO> {
+  return apiRequest<EgressProbeDTO>(`/api/admin/v1/egress-nodes/${id}/refresh-clearance`, { method: "POST" });
 }

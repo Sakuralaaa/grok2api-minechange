@@ -22,6 +22,8 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.POST("/egress-nodes", h.create)
 	router.PUT("/egress-nodes/:id", h.update)
 	router.DELETE("/egress-nodes/:id", h.delete)
+	router.POST("/egress-nodes/:id/test", h.test)
+	router.POST("/egress-nodes/:id/refresh-clearance", h.refreshClearance)
 }
 
 type nodeRequest struct {
@@ -33,6 +35,8 @@ type nodeRequest struct {
 	UserAgent         string  `json:"userAgent"`
 	CloudflareCookies *string `json:"cloudflareCookies"`
 	ClearCookies      bool    `json:"clearCookies"`
+	FlareSolverrURL   *string `json:"flareSolverrURL"`
+	ClearFlareSolverr bool    `json:"clearFlareSolverr"`
 }
 
 type nodeResponse struct {
@@ -43,6 +47,8 @@ type nodeResponse struct {
 	ProxyConfigured  bool       `json:"proxyConfigured"`
 	UserAgent        string     `json:"userAgent"`
 	CookieConfigured bool       `json:"cookieConfigured"`
+	FlareSolverrConfigured bool `json:"flareSolverrConfigured"`
+	LastClearanceAt           *time.Time `json:"lastClearanceAt,omitempty"`
 	Health           float64    `json:"health"`
 	FailureCount     int        `json:"failureCount"`
 	CooldownUntil    *time.Time `json:"cooldownUntil,omitempty"`
@@ -54,12 +60,13 @@ func (value nodeRequest) input() egressapp.Input {
 		Name: value.Name, Scope: egressdomain.Scope(value.Scope), Enabled: value.Enabled,
 		ProxyURL: value.ProxyURL, ClearProxyURL: value.ClearProxyURL, UserAgent: value.UserAgent,
 		CloudflareCookies: value.CloudflareCookies, ClearCookies: value.ClearCookies,
+		FlareSolverrURL: value.FlareSolverrURL, ClearFlareSolverr: value.ClearFlareSolverr,
 	}
 }
 
 func (h *Handler) list(c *gin.Context) {
 	scope := egressdomain.Scope(c.Query("scope"))
-	if scope != "" && scope != egressdomain.ScopeBuild && scope != egressdomain.ScopeWeb && scope != egressdomain.ScopeWebAsset {
+	if scope != "" && scope != egressdomain.ScopeGlobal && scope != egressdomain.ScopeBuild && scope != egressdomain.ScopeWeb && scope != egressdomain.ScopeWebAsset {
 		response.Error(c, http.StatusBadRequest, "invalidEgressScope", "scope 必须是 grok_build、grok_web 或 grok_web_asset")
 		return
 	}
@@ -115,8 +122,25 @@ func newNodeResponse(value egressdomain.PublicNode) nodeResponse {
 	return nodeResponse{
 		ID: value.ID, Name: value.Name, Scope: string(value.Scope), Enabled: value.Enabled,
 		ProxyConfigured: value.ProxyConfigured, UserAgent: value.UserAgent, CookieConfigured: value.CookieConfigured,
+		FlareSolverrConfigured: value.FlareSolverrConfigured, LastClearanceAt: value.LastClearanceAt,
 		Health: value.Health, FailureCount: value.FailureCount, CooldownUntil: value.CooldownUntil, LastError: value.LastError,
 	}
+}
+
+func (h *Handler) test(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok { return }
+	value, err := h.service.Test(c.Request.Context(), id)
+	if err != nil { h.writeError(c, err); return }
+	response.Success(c, http.StatusOK, value)
+}
+
+func (h *Handler) refreshClearance(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok { return }
+	value, err := h.service.RefreshClearance(c.Request.Context(), id)
+	if err != nil { h.writeError(c, err); return }
+	response.Success(c, http.StatusOK, value)
 }
 
 func (h *Handler) delete(c *gin.Context) {

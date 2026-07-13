@@ -362,11 +362,13 @@ func (runtimeSettingsModel) TableName() string { return "runtime_settings" }
 type egressNodeModel struct {
 	ID                        uint64  `gorm:"primaryKey;autoIncrement"`
 	Name                      string  `gorm:"size:160;not null;check:chk_egress_nodes_name,length(trim(name)) BETWEEN 1 AND 160"`
-	Scope                     string  `gorm:"size:32;not null;check:chk_egress_nodes_specific_scope,scope IN ('grok_build','grok_web','grok_web_asset')"`
+	Scope                     string  `gorm:"size:32;not null;check:chk_egress_nodes_specific_scope,scope IN ('global','grok_build','grok_web','grok_web_asset')"`
 	Enabled                   bool    `gorm:"not null;default:true"`
 	EncryptedProxyURL         string  `gorm:"type:text;not null;default:'';check:chk_egress_nodes_proxy_url,length(encrypted_proxy_url) <= 65536"`
 	UserAgent                 string  `gorm:"size:512;not null;default:'';check:chk_egress_nodes_user_agent,length(user_agent) <= 512"`
 	EncryptedCloudflareCookie string  `gorm:"type:text;not null;default:'';check:chk_egress_nodes_cf_cookie,length(encrypted_cloudflare_cookie) <= 65536"`
+	FlareSolverrURL           string  `gorm:"size:2048;not null;default:'';check:chk_egress_nodes_flaresolverr_url,length(flaresolverr_url) <= 2048"`
+	LastClearanceAt           *time.Time
 	Health                    float64 `gorm:"not null;default:1;check:chk_egress_nodes_health,health >= 0 AND health <= 1"`
 	FailureCount              int     `gorm:"not null;default:0;check:chk_egress_nodes_failures,failure_count >= 0"`
 	CooldownUntil             *time.Time

@@ -13,6 +13,7 @@ const (
 type Scope string
 
 const (
+	ScopeGlobal   Scope = "global"
 	ScopeBuild    Scope = "grok_build"
 	ScopeWeb      Scope = "grok_web"
 	ScopeWebAsset Scope = "grok_web_asset"
@@ -26,6 +27,8 @@ type Node struct {
 	EncryptedProxyURL         string
 	UserAgent                 string
 	EncryptedCloudflareCookie string
+	FlareSolverrURL           string
+	LastClearanceAt           *time.Time
 	Health                    float64
 	FailureCount              int
 	CooldownUntil             *time.Time
@@ -42,10 +45,20 @@ type PublicNode struct {
 	ProxyConfigured  bool
 	UserAgent        string
 	CookieConfigured bool
+	FlareSolverrConfigured bool
+	LastClearanceAt           *time.Time
 	Health           float64
 	FailureCount     int
 	CooldownUntil    *time.Time
 	LastError        string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+type ProbeResult struct {
+	ProxyConnected     bool   `json:"proxyConnected"`
+	StatusCode         int    `json:"statusCode"`
+	LatencyMS          int64  `json:"latencyMS"`
+	ClearanceRefreshed bool   `json:"clearanceRefreshed"`
+	Message            string `json:"message"`
 }

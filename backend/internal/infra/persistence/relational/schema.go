@@ -104,6 +104,8 @@ func applyPostgresProviderConstraintMigration(db *gorm.DB) error {
 		"ALTER TABLE request_audits ADD CONSTRAINT chk_request_audits_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
 		"ALTER TABLE response_ownership DROP CONSTRAINT IF EXISTS chk_response_ownership_provider",
 		"ALTER TABLE response_ownership ADD CONSTRAINT chk_response_ownership_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
+		"ALTER TABLE egress_nodes DROP CONSTRAINT IF EXISTS chk_egress_nodes_specific_scope",
+		"ALTER TABLE egress_nodes ADD CONSTRAINT chk_egress_nodes_specific_scope CHECK (scope IN ('global','grok_build','grok_web','grok_web_asset'))",
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {

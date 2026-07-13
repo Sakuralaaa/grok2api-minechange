@@ -45,6 +45,22 @@ func TestServiceRejectsRemovedAllScope(t *testing.T) {
 	}
 }
 
+func TestServiceAcceptsGlobalScopeAndFlareSolverr(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil { t.Fatal(err) }
+	service := NewService(nil, cipher, "web-agent")
+	proxy := "socks5h://proxy.example:1080"
+	flaresolverr := "http://flaresolverr:8191/"
+	value, err := service.applyInput(domain.Node{}, Input{Name: "global", Scope: domain.ScopeGlobal, Enabled: true, ProxyURL: &proxy, FlareSolverrURL: &flaresolverr}, true)
+	if err != nil { t.Fatal(err) }
+	if value.Scope != domain.ScopeGlobal || value.FlareSolverrURL != "http://flaresolverr:8191" || value.UserAgent != "web-agent" {
+		t.Fatalf("global node = %#v", value)
+	}
+	if defaults := service.DefaultUserAgents(); defaults[string(domain.ScopeGlobal)] != "web-agent" {
+		t.Fatalf("default user agents = %#v", defaults)
+	}
+}
+
 func TestBuildNodeAlwaysUsesProviderUserAgent(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {

@@ -1,11 +1,15 @@
 package egress
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -186,9 +190,116 @@ func (m *Manager) invalidateNodes(scope domain.Scope) {
 
 func fallbackScopes(scope domain.Scope) []domain.Scope {
 	if scope == domain.ScopeWebAsset {
-		return []domain.Scope{domain.ScopeWebAsset, domain.ScopeWeb}
+		return []domain.Scope{domain.ScopeWebAsset, domain.ScopeWeb, domain.ScopeGlobal}
 	}
-	return []domain.Scope{scope}
+	if scope == domain.ScopeGlobal {
+		return []domain.Scope{domain.ScopeGlobal}
+	}
+	return []domain.Scope{scope, domain.ScopeGlobal}
+}
+
+func (m *Manager) TestNode(ctx context.Context, id uint64) (domain.ProbeResult, error) {
+	value, err := m.repository.GetEgressNode(ctx, id)
+	if err != nil {
+		return domain.ProbeResult{}, err
+	}
+	result, err := m.probeNode(ctx, value)
+	if err == nil && result.StatusCode != http.StatusForbidden {
+		return result, nil
+	}
+	if strings.TrimSpace(value.FlareSolverrURL) == "" {
+		return result, err
+	}
+	refreshed, refreshErr := m.RefreshClearance(ctx, id)
+	if refreshErr != nil {
+		if err != nil { return result, err }
+		return result, refreshErr
+	}
+	value, getErr := m.repository.GetEgressNode(ctx, id)
+	if getErr != nil { return refreshed, getErr }
+	result, err = m.probeNode(ctx, value)
+	result.ClearanceRefreshed = true
+	return result, err
+}
+
+func (m *Manager) RefreshClearance(ctx context.Context, id uint64) (domain.ProbeResult, error) {
+	value, err := m.repository.GetEgressNode(ctx, id)
+	if err != nil { return domain.ProbeResult{}, err }
+	fsURL := strings.TrimRight(strings.TrimSpace(value.FlareSolverrURL), "/")
+	if fsURL == "" { return domain.ProbeResult{}, fmt.Errorf("FlareSolverr URL is not configured") }
+	if parsed, parseErr := url.Parse(fsURL); parseErr != nil || parsed.Host == "" {
+		return domain.ProbeResult{}, fmt.Errorf("invalid FlareSolverr URL")
+	}
+	proxyURL, err := m.cipher.Decrypt(value.EncryptedProxyURL)
+	if err != nil { return domain.ProbeResult{}, err }
+	proxyURL, err = application.NormalizeProxyURL(proxyURL)
+	if err != nil { return domain.ProbeResult{}, err }
+	payload := map[string]any{"cmd": "request.get", "url": "https://grok.com/", "maxTimeout": 90000}
+	if proxyURL != "" { payload["proxy"] = map[string]any{"url": proxyURL} }
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fsURL+"/v1", bytes.NewReader(body))
+	if err != nil { return domain.ProbeResult{}, err }
+	req.Header.Set("Content-Type", "application/json")
+	started := time.Now()
+	client := &http.Client{Timeout: 100 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil { return domain.ProbeResult{LatencyMS: time.Since(started).Milliseconds(), Message: "FlareSolverr connection failed"}, err }
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil { return domain.ProbeResult{}, err }
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return domain.ProbeResult{StatusCode: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds(), Message: "FlareSolverr HTTP error"}, fmt.Errorf("flaresolverr status %d", resp.StatusCode)
+	}
+	var solved struct {
+		Status string `json:"status"`
+		Message string `json:"message"`
+		Solution struct {
+			UserAgent string `json:"userAgent"`
+			Status int `json:"status"`
+			Cookies []struct { Name string `json:"name"`; Value string `json:"value"` } `json:"cookies"`
+		} `json:"solution"`
+	}
+	if err := json.Unmarshal(data, &solved); err != nil { return domain.ProbeResult{}, err }
+	if solved.Status != "ok" { return domain.ProbeResult{}, fmt.Errorf("flaresolverr: %s", solved.Message) }
+	parts := make([]string, 0, len(solved.Solution.Cookies))
+	for _, cookie := range solved.Solution.Cookies {
+		if strings.TrimSpace(cookie.Name) != "" && strings.TrimSpace(cookie.Value) != "" { parts = append(parts, cookie.Name+"="+cookie.Value) }
+	}
+	cookies := application.SanitizeCloudflareCookies(strings.Join(parts, "; "))
+	if cookies == "" { return domain.ProbeResult{}, fmt.Errorf("flaresolverr returned no Cloudflare cookies") }
+	value.EncryptedCloudflareCookie, err = m.cipher.Encrypt(cookies)
+	if err != nil { return domain.ProbeResult{}, err }
+	if ua := strings.TrimSpace(solved.Solution.UserAgent); ua != "" { value.UserAgent = ua }
+	now := time.Now().UTC()
+	value.LastClearanceAt = &now
+	value.Health, value.FailureCount, value.CooldownUntil, value.LastError = 1, 0, nil, ""
+	if _, err := m.repository.UpdateEgressNode(ctx, value); err != nil { return domain.ProbeResult{}, err }
+	m.invalidateNodes(value.Scope)
+	m.mu.Lock(); delete(m.clients, value.ID); m.mu.Unlock()
+	return domain.ProbeResult{ProxyConnected: true, StatusCode: solved.Solution.Status, LatencyMS: time.Since(started).Milliseconds(), ClearanceRefreshed: true, Message: "Cloudflare clearance refreshed"}, nil
+}
+
+func (m *Manager) probeNode(ctx context.Context, value domain.Node) (domain.ProbeResult, error) {
+	proxyURL, err := m.cipher.Decrypt(value.EncryptedProxyURL)
+	if err != nil { return domain.ProbeResult{}, err }
+	proxyURL, err = application.NormalizeProxyURL(proxyURL)
+	if err != nil { return domain.ProbeResult{}, err }
+	cookies, err := m.cipher.Decrypt(value.EncryptedCloudflareCookie)
+	if err != nil { return domain.ProbeResult{}, err }
+	client, err := newBrowserClient(proxyURL)
+	if err != nil { return domain.ProbeResult{}, err }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://grok.com/", nil)
+	if err != nil { return domain.ProbeResult{}, err }
+	ua := strings.TrimSpace(value.UserAgent); if ua == "" { ua = DefaultUserAgent }
+	req.Header.Set("User-Agent", ua)
+	if sanitized := application.SanitizeCloudflareCookies(cookies); sanitized != "" { req.Header.Set("Cookie", sanitized) }
+	started := time.Now()
+	resp, err := client.Do(req)
+	if err != nil { return domain.ProbeResult{LatencyMS: time.Since(started).Milliseconds(), Message: "proxy transport failed"}, err }
+	defer resp.Body.Close()
+	result := domain.ProbeResult{ProxyConnected: true, StatusCode: resp.StatusCode, LatencyMS: time.Since(started).Milliseconds()}
+	switch { case resp.StatusCode >= 200 && resp.StatusCode < 400: result.Message = "proxy and Grok are reachable"; case resp.StatusCode == http.StatusForbidden: result.Message = "Cloudflare rejected the request"; default: result.Message = fmt.Sprintf("Grok returned HTTP %d", resp.StatusCode) }
+	return result, nil
 }
 
 func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
@@ -278,6 +389,13 @@ func (m *Manager) Feedback(ctx context.Context, nodeID uint64, status int, trans
 	}
 	if _, err := m.repository.UpdateEgressNode(ctx, value); err == nil {
 		m.invalidateNodes(value.Scope)
+	}
+	if status == http.StatusForbidden && strings.TrimSpace(value.FlareSolverrURL) != "" {
+		go func(nodeID uint64) {
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_, _ = m.RefreshClearance(refreshCtx, nodeID)
+		}(nodeID)
 	}
 }
 

@@ -33,6 +33,13 @@ type Input struct {
 	UserAgent         string
 	CloudflareCookies *string
 	ClearCookies      bool
+	FlareSolverrURL   *string
+	ClearFlareSolverr bool
+}
+
+type Runtime interface {
+	TestNode(ctx context.Context, id uint64) (domain.ProbeResult, error)
+	RefreshClearance(ctx context.Context, id uint64) (domain.ProbeResult, error)
 }
 
 type Service struct {
@@ -40,7 +47,10 @@ type Service struct {
 	cipher     *security.Cipher
 	mu         sync.RWMutex
 	webUA      string
+	runtime    Runtime
 }
+
+func (s *Service) SetRuntime(runtime Runtime) { s.runtime = runtime }
 
 func NewService(repository repository.EgressRepository, cipher *security.Cipher, webUA string) *Service {
 	return &Service{repository: repository, cipher: cipher, webUA: strings.TrimSpace(webUA)}
@@ -56,9 +66,24 @@ func (s *Service) DefaultUserAgents() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return map[string]string{
+		string(domain.ScopeGlobal): s.webUA,
 		string(domain.ScopeBuild): "", string(domain.ScopeWeb): s.webUA,
 		string(domain.ScopeWebAsset): s.webUA,
 	}
+}
+
+func (s *Service) Test(ctx context.Context, id uint64) (domain.ProbeResult, error) {
+	if s.runtime == nil {
+		return domain.ProbeResult{}, errors.New("egress runtime unavailable")
+	}
+	return s.runtime.TestNode(ctx, id)
+}
+
+func (s *Service) RefreshClearance(ctx context.Context, id uint64) (domain.ProbeResult, error) {
+	if s.runtime == nil {
+		return domain.ProbeResult{}, errors.New("egress runtime unavailable")
+	}
+	return s.runtime.RefreshClearance(ctx, id)
 }
 
 func (s *Service) List(ctx context.Context, scope domain.Scope, sort repository.SortQuery) ([]domain.PublicNode, error) {
@@ -114,8 +139,8 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 	if name == "" || len(name) > 160 {
 		return domain.Node{}, fmt.Errorf("%w: 名称必须在 1 到 160 个字符之间", ErrInvalidInput)
 	}
-	if input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeWebAsset {
-		return domain.Node{}, fmt.Errorf("%w: scope 必须是 grok_build、grok_web 或 grok_web_asset", ErrInvalidInput)
+	if input.Scope != domain.ScopeGlobal && input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeWebAsset {
+		return domain.Node{}, fmt.Errorf("%w: scope 必须是 global、grok_build、grok_web 或 grok_web_asset", ErrInvalidInput)
 	}
 	value.Name, value.Scope, value.Enabled = name, input.Scope, input.Enabled
 	if input.Scope == domain.ScopeBuild {
@@ -123,6 +148,18 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 		value.UserAgent = ""
 	} else {
 		value.UserAgent = strings.TrimSpace(input.UserAgent)
+	}
+	if input.ClearFlareSolverr {
+		value.FlareSolverrURL = ""
+	} else if input.FlareSolverrURL != nil {
+		normalized, err := normalizeHTTPServiceURL(*input.FlareSolverrURL)
+		if err != nil {
+			return domain.Node{}, fmt.Errorf("%w: FlareSolverr URL %v", ErrInvalidInput, err)
+		}
+		value.FlareSolverrURL = normalized
+	}
+	if input.Scope == domain.ScopeBuild {
+		value.FlareSolverrURL = ""
 	}
 	if input.Scope != domain.ScopeBuild && value.UserAgent == "" {
 		s.mu.RLock()
@@ -177,9 +214,32 @@ func publicNode(value domain.Node) domain.PublicNode {
 	return domain.PublicNode{
 		ID: value.ID, Name: value.Name, Scope: value.Scope, Enabled: value.Enabled,
 		ProxyConfigured: value.EncryptedProxyURL != "", UserAgent: userAgent, CookieConfigured: value.EncryptedCloudflareCookie != "",
+		FlareSolverrConfigured: value.FlareSolverrURL != "", LastClearanceAt: value.LastClearanceAt,
 		Health: value.Health, FailureCount: value.FailureCount, CooldownUntil: value.CooldownUntil, LastError: value.LastError,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
+}
+
+func normalizeHTTPServiceURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 2048 {
+		return "", errors.New("过长")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return "", errors.New("格式无效")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("必须使用 HTTP 或 HTTPS")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("不能包含查询参数或片段")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String(), nil
 }
 
 func NormalizeProxyURL(value string) (string, error) {
