@@ -28,7 +28,6 @@ export const settingsSchema = z.object({
     timeoutSeconds: z.number().int().min(30).max(3600),
     quotaLimit: z.number().int().min(1).max(100000),
     quotaWindowSeconds: z.number().int().min(60).max(7 * 86_400),
-  },
     streamHeartbeatInterval: z.number().min(0).max(300),
   }),
   providerBuild: z.object({
