@@ -266,7 +266,9 @@ func (m *Manager) RefreshClearance(ctx context.Context, id uint64) (domain.Probe
 		if strings.TrimSpace(cookie.Name) != "" && strings.TrimSpace(cookie.Value) != "" { parts = append(parts, cookie.Name+"="+cookie.Value) }
 	}
 	cookies := application.SanitizeCloudflareCookies(strings.Join(parts, "; "))
-	if cookies == "" { return domain.ProbeResult{}, fmt.Errorf("flaresolverr returned no Cloudflare cookies") }
+	if cookies == "" && (solved.Solution.Status < 200 || solved.Solution.Status >= 300) {
+		return domain.ProbeResult{}, fmt.Errorf("flaresolverr returned no Cloudflare cookies")
+	}
 	value.EncryptedCloudflareCookie, err = m.cipher.Encrypt(cookies)
 	if err != nil { return domain.ProbeResult{}, err }
 	if ua := strings.TrimSpace(solved.Solution.UserAgent); ua != "" { value.UserAgent = ua }
@@ -276,7 +278,11 @@ func (m *Manager) RefreshClearance(ctx context.Context, id uint64) (domain.Probe
 	if _, err := m.repository.UpdateEgressNode(ctx, value); err != nil { return domain.ProbeResult{}, err }
 	m.invalidateNodes(value.Scope)
 	m.mu.Lock(); delete(m.clients, value.ID); m.mu.Unlock()
-	return domain.ProbeResult{ProxyConnected: true, StatusCode: solved.Solution.Status, LatencyMS: time.Since(started).Milliseconds(), ClearanceRefreshed: true, Message: "Cloudflare clearance refreshed"}, nil
+	message := "Cloudflare clearance refreshed"
+	if cookies == "" {
+		message = "No Cloudflare challenge detected; stale clearance cleared"
+	}
+	return domain.ProbeResult{ProxyConnected: true, StatusCode: solved.Solution.Status, LatencyMS: time.Since(started).Milliseconds(), ClearanceRefreshed: true, Message: message}, nil
 }
 
 func (m *Manager) probeNode(ctx context.Context, value domain.Node) (domain.ProbeResult, error) {
