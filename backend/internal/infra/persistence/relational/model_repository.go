@@ -50,7 +50,7 @@ func NewModelRepository(db *Database) *ModelRepository { return &ModelRepository
 
 func (r *ModelRepository) List(ctx context.Context, input repository.ModelListQuery) ([]model.Route, int64, error) {
 	var total int64
-	query := r.db.db.WithContext(ctx).Model(&modelRouteModel{})
+	query := r.availableRoutes(r.db.db.WithContext(ctx).Model(&modelRouteModel{}))
 	if search := strings.TrimSpace(input.Page.Search); search != "" {
 		pattern := "%" + strings.ToLower(search) + "%"
 		query = query.Where("LOWER(public_id) LIKE ? OR LOWER(upstream_model) LIKE ?", pattern, pattern)
@@ -257,7 +257,11 @@ func (r *ModelRepository) UpsertRoutes(ctx context.Context, values []model.Route
 				return fmt.Errorf("模型路由目录包含无效条目")
 			}
 			var existing modelRouteModel
-			err := tx.Where("provider = ? AND upstream_model = ?", value.Provider, value.UpstreamModel).First(&existing).Error
+			existingQuery := tx.Where("provider = ? AND upstream_model = ?", value.Provider, value.UpstreamModel)
+			if value.Provider == account.ProviderConsole {
+				existingQuery = tx.Where("public_id = ?", value.PublicID)
+			}
+			err := existingQuery.First(&existing).Error
 			if err == nil {
 				continue
 			}

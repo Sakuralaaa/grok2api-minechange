@@ -41,6 +41,10 @@ func TestModelCapabilitiesAggregateAndGateEnabledRoutes(t *testing.T) {
 	if err != nil || len(beforeSync) != 0 {
 		t.Fatalf("before sync = %#v, err = %v", beforeSync, err)
 	}
+	adminBeforeSync, totalBeforeSync, err := models.List(ctx, repository.ModelListQuery{Page: repository.PageQuery{Limit: 20}})
+	if err != nil || totalBeforeSync != 0 || len(adminBeforeSync) != 0 {
+		t.Fatalf("admin list before sync = %#v, total = %d, err = %v", adminBeforeSync, totalBeforeSync, err)
+	}
 	now := time.Now().UTC()
 	if err := models.ReplaceAccountCapabilities(ctx, first.ID, []string{"grok-basic"}, now); err != nil {
 		t.Fatal(err)
@@ -82,6 +86,31 @@ func TestModelCapabilitiesAggregateAndGateEnabledRoutes(t *testing.T) {
 	}
 	if _, err := models.GetByPublicID(ctx, "grok-premium-build"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("premium route err = %v", err)
+	}
+}
+
+func TestUpsertRoutesAllowsConsoleEffortVariantsForOneUpstream(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDatabase(t)
+	repo := NewModelRepository(database)
+
+	values := []model.Route{
+		{PublicID: "grok-4.3-low-console", Provider: account.ProviderConsole, UpstreamModel: "grok-4.3", Capability: model.CapabilityResponses, Enabled: true},
+		{PublicID: "grok-4.3-medium-console", Provider: account.ProviderConsole, UpstreamModel: "grok-4.3", Capability: model.CapabilityResponses, Enabled: true},
+		{PublicID: "grok-4.3-high-console", Provider: account.ProviderConsole, UpstreamModel: "grok-4.3", Capability: model.CapabilityResponses, Enabled: true},
+	}
+	if err := repo.UpsertRoutes(ctx, values); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int64
+	if err := database.db.WithContext(ctx).Model(&modelRouteModel{}).
+		Where("provider = ? AND upstream_model = ?", account.ProviderConsole, "grok-4.3").
+		Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != int64(len(values)) {
+		t.Fatalf("console effort route count = %d, want %d", count, len(values))
 	}
 }
 

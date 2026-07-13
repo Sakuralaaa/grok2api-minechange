@@ -43,6 +43,7 @@ var schemaIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_quota_windows_due ON account_quota_windows(remaining, reset_at, account_id)",
 	"CREATE INDEX IF NOT EXISTS idx_model_routes_created_id ON model_routes(created_at DESC, id DESC)",
 	"CREATE INDEX IF NOT EXISTS idx_model_routes_enabled ON model_routes(enabled, public_id, id)",
+	"CREATE UNIQUE INDEX IF NOT EXISTS uidx_provider_upstream_non_console ON model_routes(provider, upstream_model) WHERE provider <> 'grok_console'",
 	"CREATE INDEX IF NOT EXISTS idx_model_route_accounts_account_route ON model_route_accounts(account_id, model_route_id)",
 	"CREATE INDEX IF NOT EXISTS idx_account_model_quota_blocks_due ON account_model_quota_blocks(cooldown_until, account_id)",
 	"CREATE INDEX IF NOT EXISTS idx_client_keys_created_id ON client_keys(created_at DESC, id DESC)",
@@ -94,6 +95,7 @@ func applyPostgresProviderConstraintMigration(db *gorm.DB) error {
 		return nil
 	}
 	statements := []string{
+		"DROP INDEX IF EXISTS uidx_provider_upstream",
 		"ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS chk_accounts_provider",
 		"ALTER TABLE provider_accounts ADD CONSTRAINT chk_accounts_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
 		"ALTER TABLE model_routes DROP CONSTRAINT IF EXISTS chk_model_routes_provider",
