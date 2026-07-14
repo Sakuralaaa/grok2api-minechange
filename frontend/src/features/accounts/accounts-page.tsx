@@ -855,6 +855,18 @@ function AccountMetricPanel({ icon, label, value, detail, loading }: { icon: Rea
   );
 }
 
+function webTierLabel(tier: AccountDTO["webTier"]) {
+  if (tier === "basic") return "Free";
+  if (tier === "super") return "Super";
+  if (tier === "heavy") return "Heavy";
+  return "Auto";
+}
+
+function WebAccountType({ tier }: { tier?: AccountDTO["webTier"] }) {
+  const label = webTierLabel(tier);
+  return <AccountTypeText label={label} variant={tier === "basic" ? "free" : "default"} />;
+}
+
 function AccountType({ quota }: { quota: QuotaDTO }) {
   const { t } = useTranslation();
   if (quota.type === "unknown") {
