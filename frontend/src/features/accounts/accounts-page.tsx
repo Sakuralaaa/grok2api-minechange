@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CircleCheck, ClipboardPaste, Clock3, Copy, Download, ExternalLink, FileUp, Info, Link2, MoreHorizontal, Pencil, RefreshCw, RotateCw, Search, Trash2, TriangleAlert, Users } from "lucide-react";
+import { ArrowRight, CircleCheck, ClipboardPaste, Clock3, Copy, Download, ExternalLink, FileUp, Link2, MoreHorizontal, Pencil, RefreshCw, RotateCw, Search, Trash2, TriangleAlert, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -56,7 +56,6 @@ import {
   type AccountDTO,
   type AccountUpdateInput,
   type AccountTaskProgressDTO,
-  type BillingDTO,
   type BuildConversionInput,
   type DeviceSessionDTO,
   type QuotaDTO,
@@ -854,34 +853,6 @@ function AccountMetricPanel({ icon, label, value, detail, loading }: { icon: Rea
       <p className={cn("mt-1 text-xs text-muted-foreground", loading && "invisible")}>{detail}</p>
     </div>
   );
-}
-
-function quotaProductLabel(code: number, locale: string) {
-  const chinese = locale.toLowerCase().startsWith("zh");
-  const labels: Record<number, [string, string]> = {
-    0: ["第三方", "Third Party"],
-    1: ["API", "API"],
-    2: ["Grok Build", "Grok Build"],
-    3: ["Grok Plugins", "Grok Plugins"],
-    4: ["聊天", "Chat"],
-    5: ["Imagine", "Imagine"],
-    6: ["语音", "Voice"],
-  };
-  const label = labels[code];
-  return label ? label[chinese ? 0 : 1] : `${chinese ? "产品" : "Product"} ${code}`;
-}
-
-function quotaProductColor(code: number) {
-  const colors: Record<number, string> = {
-    0: "bg-zinc-500",
-    1: "bg-sky-500",
-    2: "bg-emerald-500",
-    3: "bg-amber-500",
-    4: "bg-indigo-400",
-    5: "bg-blue-600",
-    6: "bg-rose-500",
-  };
-  return colors[code] ?? "bg-muted-foreground";
 }
 
 function AccountType({ quota }: { quota: QuotaDTO }) {
