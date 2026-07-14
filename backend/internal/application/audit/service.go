@@ -360,7 +360,7 @@ func (s *Service) summary(ctx context.Context, search, rawPeriod string, filter 
 		return s.loadSummary(ctx, search, filter, period, start, end)
 	}
 	cacheKey := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", period, search, filter.Model, filter.Status, filter.Mode, filter.Key, filter.Account)
-	return s.summaryCache.Load(ctx, cacheKey, end, func() (SummaryResult, error) {
+	return s.summaryCache.Load(cacheKey, end, func() (SummaryResult, error) {
 		return s.loadSummary(ctx, search, filter, period, start, end)
 	})
 }

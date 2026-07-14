@@ -197,8 +197,11 @@ func (a *modelCapabilityAdapter) Provider() account.Provider {
 	if a.provider == "" {
 		return account.ProviderBuild
 	}
+	return a.provider
+}
+
 func (a *modelCapabilityAdapter) Definition() provider.Definition {
-	value := account.ProviderBuild
+	value := a.Provider()
 	definition := provider.Definition{
 		Provider: value, ModelNamespace: value.ModelNamespace(), ModelCatalog: provider.ModelCatalogStatic,
 		ModelCapabilities: []modeldomain.Capability{modeldomain.CapabilityResponses},
@@ -223,9 +226,6 @@ func (a *modelCapabilityAdapter) Definition() provider.Definition {
 		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated}
 	}
 	return definition
-}
-
-	return a.provider
 }
 func (a *modelCapabilityAdapter) ListModels(ctx context.Context, credential account.Credential) ([]string, error) {
 	a.mu.Lock()

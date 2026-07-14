@@ -44,15 +44,15 @@ func TestModelRouteAliasesResolveAndMigrateLegacyRoutes(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := models.ReplaceAccountCapabilities(ctx, consoleAccount.ID, []string{"grok-4.3"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	legacy, err := models.GetByPublicID(ctx, "grok-4.3-console")
 	if err != nil {
 		t.Fatal(err)
 	}
 	canonical, err := models.GetByPublicID(ctx, "grok-4.3-medium-console")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := models.ReplaceAccountCapabilities(ctx, consoleAccount.ID, []string{"grok-4.3"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	key, err := keys.Create(ctx, clientkey.Key{
