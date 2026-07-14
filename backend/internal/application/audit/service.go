@@ -178,6 +178,10 @@ func (s *Service) List(ctx context.Context, page, pageSize int) ([]auditdomain.R
 	return s.audits.List(ctx, (page-1)*pageSize, pageSize)
 }
 
+func (s *Service) Get(ctx context.Context, id uint64) (auditdomain.Record, error) {
+	return s.audits.Get(ctx, id)
+}
+
 // CursorResult 表示按递减 ID 游标读取的一页审计记录。
 type CursorResult struct {
 	Items      []auditdomain.Record
@@ -356,7 +360,7 @@ func (s *Service) summary(ctx context.Context, search, rawPeriod string, filter 
 		return s.loadSummary(ctx, search, filter, period, start, end)
 	}
 	cacheKey := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", period, search, filter.Model, filter.Status, filter.Mode, filter.Key, filter.Account)
-	return s.summaryCache.Load(cacheKey, end, func() (SummaryResult, error) {
+	return s.summaryCache.Load(ctx, cacheKey, end, func() (SummaryResult, error) {
 		return s.loadSummary(ctx, search, filter, period, start, end)
 	})
 }
@@ -502,7 +506,12 @@ func (s *Service) persistBatch(records []auditdomain.Record) {
 			return
 		}
 		if attempt < auditWriteAttempts {
-			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+			timer := time.NewTimer(time.Duration(attempt) * 100 * time.Millisecond)
+			select {
+			case <-s.stop:
+				timer.Stop()
+			case <-timer.C:
+			}
 		}
 	}
 	dropped := s.dropped.Add(uint64(len(records)))

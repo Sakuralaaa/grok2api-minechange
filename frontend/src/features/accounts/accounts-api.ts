@@ -270,6 +270,10 @@ export function refreshAllAccountTokens(onProgress?: (value: AccountTaskProgress
   return runAccountTask("/api/admin/v1/accounts/refresh-tokens", undefined, ["succeeded", "failed", "skipped"], onProgress, signal);
 }
 
+export function refreshAccountsTokens(ids: string[], onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountTokenRefreshResultDTO> {
+  return runAccountTask("/api/admin/v1/accounts/batch/refresh-tokens", { ids, provider: "grok_build" }, ["succeeded", "failed", "skipped"], onProgress, signal);
+}
+
 export function refreshAllWebAccountQuotas(onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountBatchResultDTO> {
   return runAccountTask("/api/admin/v1/accounts/web/refresh-quotas", undefined, ["succeeded", "failed"], onProgress, signal);
 }

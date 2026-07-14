@@ -298,7 +298,7 @@ func (s *Service) runVideoJob(parent context.Context, job media.Job, route model
 	if err := s.recordVideoUsage(context.Background(), job, time.Since(startedAt).Milliseconds()); err != nil {
 		s.logger.Error("video_usage_record_failed", "job_id", job.ID, "event_id", "video_usage_"+job.ID, "error", err)
 	}
-	if route.Provider == account.ProviderWeb && lease.QuotaMode == "weekly" {
+	if quotaKind, _ := s.providers.QuotaKind(route.Provider); quotaKind == provider.QuotaRemoteWindow && lease.QuotaMode == "weekly" {
 		s.accounts.QueueWebQuotaRefresh(job.AccountID, lease.QuotaMode)
 	}
 }

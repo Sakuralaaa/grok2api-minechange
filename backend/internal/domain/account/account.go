@@ -15,6 +15,37 @@ const (
 	ProviderConsole Provider = "grok_console"
 )
 
+var providers = [...]Provider{ProviderBuild, ProviderWeb, ProviderConsole}
+
+// Providers 返回按产品展示和后台维护顺序排列的稳定 Provider 集合。
+func Providers() []Provider {
+	return append([]Provider(nil), providers[:]...)
+}
+
+// IsValid 判断 Provider 是否属于当前系统固定支持的渠道。
+func (p Provider) IsValid() bool {
+	switch p {
+	case ProviderBuild, ProviderWeb, ProviderConsole:
+		return true
+	default:
+		return false
+	}
+}
+
+// ModelNamespace 返回渠道稳定命名空间标识；公开模型名仍使用强制后缀，不依赖此前缀路由。
+func (p Provider) ModelNamespace() string {
+	switch p {
+	case ProviderBuild:
+		return "Build"
+	case ProviderWeb:
+		return "Web"
+	case ProviderConsole:
+		return "Console"
+	default:
+		return ""
+	}
+}
+
 type AuthType string
 
 const (

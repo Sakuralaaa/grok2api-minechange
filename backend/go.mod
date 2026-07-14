@@ -14,6 +14,7 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	golang.org/x/crypto v0.54.0
+	github.com/bdandy/go-socks4 v1.2.3
 	golang.org/x/net v0.56.0
 	golang.org/x/sync v0.22.0
 	google.golang.org/protobuf v1.36.10
@@ -28,7 +29,6 @@ require (
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
-	github.com/bdandy/go-socks4 v1.2.3 // indirect
 	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
 	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect

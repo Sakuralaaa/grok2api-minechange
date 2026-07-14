@@ -120,13 +120,22 @@ func (s *Service) refreshDueCredentials(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if !credential.Enabled || credential.AuthStatus != accountdomain.AuthStatusActive || credential.Provider != accountdomain.ProviderBuild || credential.EncryptedRefreshToken == "" {
+			if !credential.Enabled || credential.Provider != accountdomain.ProviderBuild || credential.EncryptedRefreshToken == "" {
 				return nil
 			}
-			if credential.RefreshDueAt != nil && credential.RefreshDueAt.After(s.now()) {
+			if credential.AuthStatus != accountdomain.AuthStatusActive && credential.AuthStatus != accountdomain.AuthStatusReauthRequired {
 				return nil
 			}
-			_, err = s.ensureCredential(taskCtx, credential, true, false, true)
+			// reauthRequired 立即强制刷新；active 仍尊重 refresh_due_at 调度。
+			if credential.AuthStatus == accountdomain.AuthStatusActive && credential.RefreshDueAt != nil && credential.RefreshDueAt.After(s.now()) {
+				return nil
+			}
+			// 失效号强制刷新时绕过进程内节流，并忽略 due-at 窗口。
+			forceBypass := credential.AuthStatus == accountdomain.AuthStatusReauthRequired
+			if forceBypass {
+				s.clearRefreshState(credential.ID)
+			}
+			_, err = s.ensureCredential(taskCtx, credential, true, forceBypass, !forceBypass)
 			return err
 		})
 		if batchErr != nil {

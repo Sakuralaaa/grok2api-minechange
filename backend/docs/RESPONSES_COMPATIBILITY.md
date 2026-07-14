@@ -9,7 +9,7 @@
 | Endpoint | Status | Notes |
 | --- | --- | --- |
 | `POST /v1/responses` | Supported | JSON 与 SSE，支持工具调用、结构化输出和 encrypted reasoning 回放 |
-| `POST /v1/responses/compact` | Supported | 强制非流式，使用正常模型路由和账号选择 |
+| `POST /v1/responses/compact` | Supported | 强制非流式，使用正常模型路由和账号选择；若 compact 请求携带 `tool_choice` 但没有可用 `tools`，网关会剥离 `tool_choice` 后再转发上游 |
 | `GET /v1/responses/{response_id}` | Supported | 根据持久化归属回到创建该 Response 的账号，并透传 `include` 等查询参数 |
 | `DELETE /v1/responses/{response_id}` | Supported | 上游删除成功后移除本地归属 |
 | `GET /v1/models` | Supported | 返回管理端已启用且账号池具备服务能力的公开模型路由 |
@@ -86,9 +86,11 @@ Grok Build `0.2.99` 尚未原生接受 OpenAI 新版 `namespace` 与 `tool_searc
 
 OpenAI `custom` 工具会转换为只接受 `input` 字符串的普通函数，并在 JSON/SSE 响应及续轮历史中恢复为 `custom_tool_call`、`custom_tool_call_output` 和 `response.custom_tool_call_input.*` 事件。纯文本 format 可兼容；grammar 无法等价表达，会返回 `unsupported_parameter`。
 
+当 Codex 自动压缩请求携带 `tool_choice` 却没有可用 `tools`（含 `tools: []`，或工具全部被兼容层延迟/剥离）时，Grok Build 上游会返回 `invalid-argument: A tool_choice was set on the request but no tools were specified.`。网关在 Build 规范化阶段会删除该 `tool_choice`，必要时同时删除空的 `tools`，并在响应头 `X-Grok2API-Compatibility-Warnings` 中返回 `tool_choice_stripped_without_tools`。
+
 Codex 的可见 `agent_message` 与 `mcp_tool_call_output` 会保留为 developer 文本；`local_shell_call/output` 与 `apply_patch_call/output` 保持结构化续轮协议。不透明或加密的 agent 内容会替换为不含密文的边界消息，`compaction_trigger` 会替换为压缩边界消息，避免静默丢弃或让整轮失败。SSE 兼容层只向下游保留标准 `response.*`、`error` 与 `[DONE]`，过滤上游私有事件，同时保留标准 comment、`id` 和 `retry` 字段。
 
-发生协议降级时，响应 Header `X-Grok2API-Compatibility-Warnings` 会返回稳定的逗号分隔代码，例如 `web_search_controls_downgraded`、`legacy_local_shell_upgraded`、`apply_patch_emulated`、`additional_tools_position_approximated`。客户端可记录这些代码进行审计，不包含提示词、工具参数或凭据。
+发生协议降级时，响应 Header `X-Grok2API-Compatibility-Warnings` 会返回稳定的逗号分隔代码，例如 `web_search_controls_downgraded`、`legacy_local_shell_upgraded`、`apply_patch_emulated`、`additional_tools_position_approximated`、`tool_choice_stripped_without_tools`。客户端可记录这些代码进行审计，不包含提示词、工具参数或凭据。
 
 Chat Completions 与 Messages 都先转换为标准 Responses 输入项。Build 将其发送到原生 Responses 上游，并把 JSON/SSE 转回调用方协议；Web 再把同一规范输入转换为 app-chat 对话载荷。两种 Provider 都支持文本、URL/Base64 图片、客户端函数工具和工具结果。不支持的音频、Files API、Anthropic server tools 和 Web `/responses/compact` 会返回明确错误，不会静默丢弃。
 

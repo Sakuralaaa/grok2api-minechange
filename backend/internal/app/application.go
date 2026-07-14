@@ -161,6 +161,13 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	consoleAdapter := consoleprovider.NewAdapter(consoleProviderConfig(cfg), egressManager, cipher)
 	accountapp.SetConsoleQuotaDefaults(cfg.Provider.Console.QuotaLimit, cfg.Provider.Console.QuotaWindowSeconds)
 	providers := provider.NewRegistry(cliAdapter, webAdapter, consoleAdapter)
+	if err := providers.Validate(); err != nil {
+		if runtimeStore != nil {
+			_ = runtimeStore.Close()
+		}
+		database.Close()
+		return nil, fmt.Errorf("校验 Provider 能力边界: %w", err)
+	}
 	adminService := adminauth.NewService(adminRepo, sessionRepo, security.NewTokenService(cfg.Secrets.JWTSecret), cfg.Auth.AccessTokenTTL.Value(), cfg.Auth.RefreshTokenTTL.Value())
 	adminService.SetLoginRateLimiter(rateLimiter)
 	if err := adminService.Bootstrap(ctx, cfg.BootstrapAdmin.Username, cfg.BootstrapAdmin.Password); err != nil {
@@ -211,12 +218,19 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		database.Close()
 		return nil, fmt.Errorf("初始化 Grok Web 模型目录: %w", err)
 	}
-	if err := modelRepo.UpsertRoutes(ctx, consoleprovider.AllRoutes()); err != nil {
+	if err := modelRepo.UpsertRoutes(ctx, consoleprovider.ListedRoutes()); err != nil {
 		if runtimeStore != nil {
 			_ = runtimeStore.Close()
 		}
 		database.Close()
 		return nil, fmt.Errorf("seed Grok Console routes: %w", err)
+	}
+	if err := modelRepo.EnsureRouteAliases(ctx, consoleprovider.AliasBindings()); err != nil {
+		if runtimeStore != nil {
+			_ = runtimeStore.Close()
+		}
+		database.Close()
+		return nil, fmt.Errorf("seed Grok Console model aliases: %w", err)
 	}
 
 	accountSyncService := accountsyncapp.NewService(logger, accountService, accountService, accountService, modelService)

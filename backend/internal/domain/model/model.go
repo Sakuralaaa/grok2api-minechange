@@ -24,6 +24,13 @@ const (
 	OriginManual     Origin = "manual"
 )
 
+// AliasBinding 将兼容公开模型名绑定到规范公开模型名。
+type AliasBinding struct {
+	Alias             string
+	CanonicalPublicID string
+	Provider          account.Provider
+}
+
 // Route 表示公开模型名到上游模型名的稳定映射。
 type Route struct {
 	ID                uint64
@@ -34,6 +41,7 @@ type Route struct {
 	Origin            Origin
 	Enabled           bool
 	BoundAccountIDs   []uint64
+	Aliases           []string
 	SupportedAccounts int
 	SyncedAccounts    int
 	TotalAccounts     int

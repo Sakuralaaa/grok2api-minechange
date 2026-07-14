@@ -16,6 +16,7 @@ const (
 	ScopeGlobal   Scope = "global"
 	ScopeBuild    Scope = "grok_build"
 	ScopeWeb      Scope = "grok_web"
+	ScopeConsole  Scope = "grok_console"
 	ScopeWebAsset Scope = "grok_web_asset"
 )
 

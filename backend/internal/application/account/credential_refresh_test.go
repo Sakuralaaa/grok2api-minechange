@@ -11,6 +11,7 @@ import (
 	"time"
 
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
+	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
@@ -450,6 +451,34 @@ type credentialRefreshAdapter struct {
 func (a *credentialRefreshAdapter) Provider() accountdomain.Provider {
 	return accountdomain.ProviderBuild
 }
+func (a *credentialRefreshAdapter) Definition() provider.Definition {
+	value := accountdomain.ProviderBuild
+	definition := provider.Definition{
+		Provider: value, ModelNamespace: value.ModelNamespace(), ModelCatalog: provider.ModelCatalogStatic,
+		ModelCapabilities: []modeldomain.Capability{modeldomain.CapabilityResponses},
+		Quota: provider.QuotaBilling,
+		Credential: provider.CredentialSurface{AuthType: accountdomain.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true},
+		Conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, Compact: true, StoredResponses: true},
+		Inference: provider.InferencePolicy{Usage: provider.UsageUpstream},
+	}
+	switch value {
+	case accountdomain.ProviderWeb:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityChat, modeldomain.CapabilityImage, modeldomain.CapabilityImageEdit, modeldomain.CapabilityVideo}
+		definition.Quota = provider.QuotaRemoteWindow
+		definition.Credential = provider.CredentialSurface{AuthType: accountdomain.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, StoredResponses: true}
+		definition.Media = provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated, RetryForbiddenAsEgress: true}
+	case accountdomain.ProviderConsole:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaLocalWindow
+		definition.Credential = provider.CredentialSurface{AuthType: accountdomain.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated}
+	}
+	return definition
+}
+
 
 func (a *credentialRefreshAdapter) RefreshCredential(ctx context.Context, _ accountdomain.Credential) (provider.RefreshedCredential, error) {
 	if a.delay > 0 {
@@ -498,3 +527,62 @@ func (a *credentialRefreshAdapter) ParseImportedCredentials([]byte) ([]provider.
 func (a *credentialRefreshAdapter) MarshalCredentials([]provider.CredentialSeed) ([]byte, error) {
 	return nil, nil
 }
+
+func TestRefreshAllTokensIncludesReauthRequiredAccounts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	service, credential, adapter := newCredentialRefreshTestService(t, now)
+	// Mark as reauthRequired while still holding a refresh token.
+	if err := service.MarkReauthRequired(ctx, credential.ID, "stale access token"); err != nil {
+		t.Fatal(err)
+	}
+	// Add an unrefreshable account that should be skipped.
+	if _, _, err := service.accounts.UpsertByIdentity(ctx, accountdomain.Credential{
+		Provider: accountdomain.ProviderBuild, AuthType: accountdomain.AuthTypeOAuth, Name: "no-refresh",
+		SourceKey: "no-refresh", EncryptedAccessToken: "access-only", Enabled: true, AuthStatus: accountdomain.AuthStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	succeeded, failed, skipped, err := service.RefreshAllTokensWithProgress(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if succeeded != 1 || failed != 0 || skipped != 1 {
+		t.Fatalf("result = %d/%d/%d", succeeded, failed, skipped)
+	}
+	if adapter.refreshCount.Load() != 1 {
+		t.Fatalf("refresh count = %d", adapter.refreshCount.Load())
+	}
+	updated, err := service.accounts.Get(ctx, credential.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AuthStatus != accountdomain.AuthStatusActive {
+		t.Fatalf("auth status = %s", updated.AuthStatus)
+	}
+}
+
+func TestBatchRefreshTokensSelectedAccounts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	service, credential, adapter := newCredentialRefreshTestService(t, now)
+	other, _, err := service.accounts.UpsertByIdentity(ctx, accountdomain.Credential{
+		Provider: accountdomain.ProviderBuild, AuthType: accountdomain.AuthTypeOAuth, Name: "other",
+		SourceKey: "other", EncryptedAccessToken: "access", EncryptedRefreshToken: "refresh-other",
+		ExpiresAt: now.Add(time.Hour), Enabled: true, AuthStatus: accountdomain.AuthStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	succeeded, failed, skipped, err := service.BatchRefreshTokens(ctx, []uint64{credential.ID, other.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if succeeded != 2 || failed != 0 || skipped != 0 {
+		t.Fatalf("result = %d/%d/%d", succeeded, failed, skipped)
+	}
+	if adapter.refreshCount.Load() != 2 {
+		t.Fatalf("refresh count = %d", adapter.refreshCount.Load())
+	}
+}
+

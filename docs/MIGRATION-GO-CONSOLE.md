@@ -142,3 +142,21 @@ curl -sS "$BASE/v1/responses" -H "Authorization: Bearer $KEY" -H "Content-Type: 
 
 - Python 旧树归档于 `legacy/python-v2/`（仅参考，不再作为运行时）。
 - 回滚镜像到上一 GHCR tag，恢复备份的 `data/` 与配置。
+
+## Provider Definition（Go 地基）
+
+本 fork 已吸收 Provider Definition 能力边界与启动校验，详见 [PROVIDER_ARCHITECTURE.md](./PROVIDER_ARCHITECTURE.md)。
+
+注意：
+
+- 对外模型名仍强制 `*-web/*-build/*-console`
+- Definition 只描述渠道能力，不改变公开命名与导入双写行为
+
+## 模型别名（Phase 2）
+
+Console 历史名（如 `grok-4.3-console`、`grok-4.20-multi-agent-low-console`）现解析到规范路由主键，不再作为独立路由 seed。
+
+- `GET /v1/models` 仍只展示 recommended/listed 名称；
+- 历史名仍可调用；
+- 思考强度等 Console 协议参数仍按请求模型名解析；
+- client key 授权绑定规范路由后，别名请求自动继承权限。

@@ -139,6 +139,7 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.POST("/accounts/refresh-billing", h.refreshAllBilling)
 	router.POST("/accounts/refresh-tokens", h.refreshAllTokens)
 	router.POST("/accounts/batch/refresh-billing", h.batchRefreshBilling)
+	router.POST("/accounts/batch/refresh-tokens", h.batchRefreshTokens)
 	router.PATCH("/accounts/batch", h.batchUpdate)
 	router.DELETE("/accounts", h.batchDelete)
 	router.PATCH("/accounts/:id", h.update)
@@ -819,6 +820,36 @@ func (h *Handler) writeServiceError(c *gin.Context, code string, err error, fall
 	default:
 		response.Error(c, fallbackStatus, code, fallbackMessage)
 	}
+}
+
+
+func (h *Handler) batchRefreshTokens(c *gin.Context) {
+	var request batchDeleteRequest
+	if c.ShouldBindJSON(&request) != nil {
+		response.Error(c, http.StatusBadRequest, "invalidRequest", "请求参数无效")
+		return
+	}
+	ids, err := parseIDs(request.IDs)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalidId", err.Error())
+		return
+	}
+	if request.Provider != string(accountdomain.ProviderBuild) || !h.validateProviderIDs(c, ids, request.Provider) {
+		if request.Provider != string(accountdomain.ProviderBuild) {
+			response.Error(c, http.StatusBadRequest, "invalidProvider", "仅 Grok Build 账号支持批量刷新凭据")
+		}
+		return
+	}
+	stream := response.NewTaskStream(c)
+	if stream == nil {
+		return
+	}
+	succeeded, failed, skipped, err := h.service.BatchRefreshTokensWithProgress(c.Request.Context(), ids, stream.ProgressObserver())
+	if err != nil {
+		stream.Fail("tokenBatchRefreshFailed", err.Error())
+		return
+	}
+	stream.Complete(gin.H{"succeeded": succeeded, "failed": failed, "skipped": skipped})
 }
 
 func (h *Handler) refreshToken(c *gin.Context) {

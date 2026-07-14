@@ -1,4 +1,4 @@
-package relational
+﻿package relational
 
 import (
 	"context"
@@ -248,6 +248,21 @@ func (r *AccountRepository) ListEnabledAccountIDs(ctx context.Context, provider 
 	err := query.Order("account.priority DESC, account.id ASC").Scan(&ids).Error
 	return ids, err
 }
+
+func (r *AccountRepository) ListTokenRefreshAccountIDs(ctx context.Context, provider account.Provider) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.db.WithContext(ctx).
+		Table("provider_accounts AS account").
+		Select("account.id").
+		Joins("JOIN account_credentials AS credential ON credential.account_id = account.id").
+		Where("account.provider = ? AND account.enabled = ?", provider, true).
+		Where("account.auth_status IN ?", []string{string(account.AuthStatusActive), string(account.AuthStatusReauthRequired)}).
+		Where("credential.encrypted_refresh <> ''").
+		Order("account.priority DESC, account.id ASC").
+		Scan(&ids).Error
+	return ids, err
+}
+
 
 func (r *AccountRepository) ListUnlinkedWebAccountIDs(ctx context.Context, limit int) ([]uint64, error) {
 	if limit < 1 {
@@ -604,9 +619,10 @@ func (r *AccountRepository) ListCriticalCredentialRefreshIDs(ctx context.Context
 		Table("account_credentials AS credential").
 		Select("credential.account_id").
 		Joins("JOIN provider_accounts AS account ON account.id = credential.account_id").
-		Where("account.provider = ? AND account.enabled = ? AND account.auth_status = ?", account.ProviderBuild, true, account.AuthStatusActive).
+		Where("account.provider = ? AND account.enabled = ?", account.ProviderBuild, true).
+		Where("account.auth_status IN ?", []string{string(account.AuthStatusActive), string(account.AuthStatusReauthRequired)}).
 		Where("credential.auth_type = ? AND credential.encrypted_refresh <> ''", account.AuthTypeOAuth).
-		Where("credential.encrypted_primary = '' OR credential.expires_at <= ? OR (credential.refresh_failures > 0 AND credential.refresh_due_at IS NOT NULL AND credential.refresh_due_at <= ?)", expiresBefore.UTC(), now.UTC()).
+		Where("account.auth_status = ? OR credential.encrypted_primary = '' OR credential.expires_at <= ? OR (credential.refresh_failures > 0 AND credential.refresh_due_at IS NOT NULL AND credential.refresh_due_at <= ?)", account.AuthStatusReauthRequired, expiresBefore.UTC(), now.UTC()).
 		Order(gorm.Expr("CASE WHEN credential.encrypted_primary = '' THEN 0 WHEN credential.expires_at <= ? THEN 1 ELSE 2 END, credential.expires_at ASC, credential.account_id ASC", now.UTC())).
 		Limit(limit).
 		Scan(&ids).Error
@@ -622,13 +638,30 @@ func (r *AccountRepository) ListDueCredentialRefreshIDs(ctx context.Context, now
 		Table("account_credentials AS credential").
 		Select("credential.account_id").
 		Joins("JOIN provider_accounts AS account ON account.id = credential.account_id").
-		Where("account.provider = ? AND account.enabled = ? AND account.auth_status = ?", account.ProviderBuild, true, account.AuthStatusActive).
-		Where("credential.auth_type = ? AND credential.encrypted_refresh <> '' AND credential.refresh_due_at IS NOT NULL AND credential.refresh_due_at <= ?", account.AuthTypeOAuth, now).
+		Where("account.provider = ? AND account.enabled = ?", account.ProviderBuild, true).
+		Where("account.auth_status IN ?", []string{string(account.AuthStatusActive), string(account.AuthStatusReauthRequired)}).
+		Where("credential.auth_type = ? AND credential.encrypted_refresh <> ''", account.AuthTypeOAuth).
+		Where("(account.auth_status = ?) OR (credential.refresh_due_at IS NOT NULL AND credential.refresh_due_at <= ?)", account.AuthStatusReauthRequired, now).
 		Order("credential.refresh_due_at ASC, credential.account_id ASC").Limit(limit).Scan(&ids).Error
 	return ids, err
 }
 
 func (r *AccountRepository) NextCredentialRefreshDueAt(ctx context.Context) (*time.Time, error) {
+	now := time.Now().UTC()
+	// reauthRequired 且仍有 refresh token 的账号视为立即到期，后台调度会优先捞起。
+	var reauthCount int64
+	if err := r.db.db.WithContext(ctx).
+		Table("account_credentials AS credential").
+		Joins("JOIN provider_accounts AS account ON account.id = credential.account_id").
+		Where("account.provider = ? AND account.enabled = ? AND account.auth_status = ?", account.ProviderBuild, true, account.AuthStatusReauthRequired).
+		Where("credential.auth_type = ? AND credential.encrypted_refresh <> ''", account.AuthTypeOAuth).
+		Count(&reauthCount).Error; err != nil {
+		return nil, err
+	}
+	if reauthCount > 0 {
+		value := now
+		return &value, nil
+	}
 	var rows []struct{ RefreshDueAt time.Time }
 	err := r.db.db.WithContext(ctx).
 		Table("account_credentials AS credential").
@@ -643,6 +676,7 @@ func (r *AccountRepository) NextCredentialRefreshDueAt(ctx context.Context) (*ti
 	value := rows[0].RefreshDueAt.UTC()
 	return &value, nil
 }
+
 
 func (r *AccountRepository) UpdateCredentialRefreshFailure(ctx context.Context, id uint64, failureCount int, retryAt time.Time, errorCode string) error {
 	return r.db.db.WithContext(ctx).Model(&accountCredentialModel{}).Where("account_id = ?", id).Updates(map[string]any{

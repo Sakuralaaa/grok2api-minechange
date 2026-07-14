@@ -139,8 +139,8 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 	if name == "" || len(name) > 160 {
 		return domain.Node{}, fmt.Errorf("%w: 名称必须在 1 到 160 个字符之间", ErrInvalidInput)
 	}
-	if input.Scope != domain.ScopeGlobal && input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeWebAsset {
-		return domain.Node{}, fmt.Errorf("%w: scope 必须是 global、grok_build、grok_web 或 grok_web_asset", ErrInvalidInput)
+	if input.Scope != domain.ScopeGlobal && input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeConsole && input.Scope != domain.ScopeWebAsset {
+		return domain.Node{}, fmt.Errorf("%w: scope 必须是 global、grok_build、grok_web、grok_console 或 grok_web_asset", ErrInvalidInput)
 	}
 	value.Name, value.Scope, value.Enabled = name, input.Scope, input.Enabled
 	if input.Scope == domain.ScopeBuild {

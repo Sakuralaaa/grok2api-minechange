@@ -89,11 +89,31 @@ func normalizeConfig(cfg Config) Config {
 
 func (a *Adapter) QuotaMode(string) string { return "console" }
 
+func (a *Adapter) SyncQuota(_ context.Context, credential account.Credential) (provider.QuotaSnapshot, error) {
+	now := time.Now().UTC()
+	resetAt := now.Add(24 * time.Hour)
+	return provider.QuotaSnapshot{SyncedAt: now, Windows: []account.QuotaWindow{{
+		AccountID: credential.ID, Mode: "console", Remaining: 150, Total: 150,
+		WindowSeconds: 86400, ResetAt: &resetAt, SyncedAt: &now, Source: account.QuotaSourceDefault, UpdatedAt: now,
+	}}}, nil
+}
+
+func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credential, mode string) (account.QuotaWindow, error) {
+	if mode != "" && mode != "console" {
+		return account.QuotaWindow{}, fmt.Errorf("不支持的 Console 额度模式 %q", mode)
+	}
+	snapshot, err := a.SyncQuota(ctx, credential)
+	if err != nil {
+		return account.QuotaWindow{}, err
+	}
+	return snapshot.Windows[0], nil
+}
+
 func (a *Adapter) TierOrder(string) []account.WebTier {
 	return []account.WebTier{account.WebTierBasic, account.WebTierSuper, account.WebTierHeavy, account.WebTierAuto}
 }
 
-func (a *Adapter) PricingModel(string) string { return "" }
+func (a *Adapter) PricingModel(upstreamModel string) string { return strings.TrimSpace(upstreamModel) }
 
 func (a *Adapter) ListModels(context.Context, account.Credential) ([]string, error) {
 	return UpstreamModels(), nil
@@ -113,6 +133,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	body := request.Body
 	var conversationOptions conversation.ResponseOptions
 	if request.NormalizeBody {
+		// normalize.go 明确拒绝 store:true / previous_response_id，并注入默认 reasoning/search tools。
 		if request.Operation == conversation.OperationChat || request.Operation == conversation.OperationMessages {
 			body, conversationOptions, err = conversation.ConvertRequestWithOptions(body, request.Model, request.Operation)
 		} else {
@@ -127,12 +148,20 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	if publicID == "" {
 		publicID = request.Model
 	}
+	if request.NormalizeBody {
+		if spec, ok := ResolvePublic(publicID); ok {
+			body, err = normalizeRequest(body, spec)
+			if err != nil {
+				return invalidLocalResponse(err), nil
+			}
+		}
+	}
 	body, err = a.enrichConsoleBody(body, publicID, request.Model, request.Streaming)
 	if err != nil {
 		return invalidLocalResponse(err), nil
 	}
 
-	lease, err := a.egress.Acquire(ctx, egressdomain.ScopeWeb, "console:"+request.Credential.SourceKey)
+	lease, err := a.egress.Acquire(ctx, egressdomain.ScopeConsole, "console:"+request.Credential.SourceKey)
 	if err != nil {
 		return nil, err
 	}

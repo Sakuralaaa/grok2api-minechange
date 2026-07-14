@@ -17,6 +17,7 @@ type ModelRepository interface {
 	GetByPublicID(ctx context.Context, publicID string) (model.Route, error)
 	UpsertDiscovered(ctx context.Context, provider account.Provider, upstreamModels []string) error
 	UpsertRoutes(ctx context.Context, values []model.Route) error
+	EnsureRouteAliases(ctx context.Context, bindings []model.AliasBinding) error
 	ReplaceProviderRoutes(ctx context.Context, provider account.Provider, values []model.Route) error
 	ReplaceAccountCapabilities(ctx context.Context, accountID uint64, upstreamModels []string, syncedAt time.Time) error
 	MarkAccountCapabilitySyncFailed(ctx context.Context, accountID uint64, attemptedAt time.Time, message string) error

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,3 +144,71 @@ func TestParseImportedCredentialsRejectsUnsupportedMap(t *testing.T) {
 		t.Fatal("旧 Map 格式不应继续被接受")
 	}
 }
+
+func TestNormalizeResponsesRequestStripsToolChoiceWithoutTools(t *testing.T) {
+	body := []byte(`{"model":"public","input":[{"role":"user","content":"summarize"}],"tool_choice":"auto"}`)
+	normalized, compatibility, err := normalizeResponsesRequest(body, "grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compatibility == nil {
+		t.Fatal("expected compatibility rewrite when tool_choice is stripped")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := payload["tool_choice"]; exists {
+		t.Fatalf("tool_choice should be stripped without tools: %#v", payload)
+	}
+	if _, exists := payload["tools"]; exists {
+		t.Fatalf("tools should remain absent: %#v", payload)
+	}
+	if !strings.Contains(compatibility.warningHeader(), "tool_choice_stripped_without_tools") {
+		t.Fatalf("compatibility warnings = %q", compatibility.warningHeader())
+	}
+}
+
+func TestNormalizeResponsesRequestStripsEmptyToolsAndToolChoice(t *testing.T) {
+	body := []byte(`{"model":"public","input":"compact me","tools":[],"tool_choice":{"type":"function","name":"shell"}}`)
+	normalized, compatibility, err := normalizeResponsesRequest(body, "grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compatibility == nil {
+		t.Fatal("expected compatibility rewrite when empty tools force tool_choice stripping")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := payload["tool_choice"]; exists {
+		t.Fatalf("tool_choice should be stripped with empty tools: %#v", payload)
+	}
+	if _, exists := payload["tools"]; exists {
+		t.Fatalf("empty tools should be removed: %#v", payload)
+	}
+	if !strings.Contains(compatibility.warningHeader(), "tool_choice_stripped_without_tools") {
+		t.Fatalf("compatibility warnings = %q", compatibility.warningHeader())
+	}
+}
+
+func TestNormalizeResponsesRequestKeepsToolChoiceWithTools(t *testing.T) {
+	body := []byte(`{"model":"public","input":"hello","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"tool_choice":"auto"}`)
+	normalized, _, err := normalizeResponsesRequest(body, "grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice should remain when tools exist: %#v", payload["tool_choice"])
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools should remain: %#v", payload["tools"])
+	}
+}
+

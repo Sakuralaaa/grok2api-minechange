@@ -13,6 +13,7 @@ import (
 
 	accountapp "github.com/chenyme/grok2api/backend/internal/application/account"
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
+	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
@@ -196,6 +197,34 @@ func (a *modelCapabilityAdapter) Provider() account.Provider {
 	if a.provider == "" {
 		return account.ProviderBuild
 	}
+func (a *modelCapabilityAdapter) Definition() provider.Definition {
+	value := account.ProviderBuild
+	definition := provider.Definition{
+		Provider: value, ModelNamespace: value.ModelNamespace(), ModelCatalog: provider.ModelCatalogStatic,
+		ModelCapabilities: []modeldomain.Capability{modeldomain.CapabilityResponses},
+		Quota: provider.QuotaBilling,
+		Credential: provider.CredentialSurface{AuthType: account.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true},
+		Conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, Compact: true, StoredResponses: true},
+		Inference: provider.InferencePolicy{Usage: provider.UsageUpstream},
+	}
+	switch value {
+	case account.ProviderWeb:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityChat, modeldomain.CapabilityImage, modeldomain.CapabilityImageEdit, modeldomain.CapabilityVideo}
+		definition.Quota = provider.QuotaRemoteWindow
+		definition.Credential = provider.CredentialSurface{AuthType: account.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, StoredResponses: true}
+		definition.Media = provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated, RetryForbiddenAsEgress: true}
+	case account.ProviderConsole:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaLocalWindow
+		definition.Credential = provider.CredentialSurface{AuthType: account.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated}
+	}
+	return definition
+}
+
 	return a.provider
 }
 func (a *modelCapabilityAdapter) ListModels(ctx context.Context, credential account.Credential) ([]string, error) {

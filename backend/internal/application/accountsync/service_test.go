@@ -14,6 +14,7 @@ import (
 	accountapp "github.com/chenyme/grok2api/backend/internal/application/account"
 	modelapp "github.com/chenyme/grok2api/backend/internal/application/model"
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
+	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
@@ -257,6 +258,34 @@ type countingAdapter struct {
 }
 
 func (a *countingAdapter) Provider() accountdomain.Provider { return accountdomain.ProviderBuild }
+func (a *countingAdapter) Definition() provider.Definition {
+	value := accountdomain.ProviderBuild
+	definition := provider.Definition{
+		Provider: value, ModelNamespace: value.ModelNamespace(), ModelCatalog: provider.ModelCatalogStatic,
+		ModelCapabilities: []modeldomain.Capability{modeldomain.CapabilityResponses},
+		Quota: provider.QuotaBilling,
+		Credential: provider.CredentialSurface{AuthType: accountdomain.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true},
+		Conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, Compact: true, StoredResponses: true},
+		Inference: provider.InferencePolicy{Usage: provider.UsageUpstream},
+	}
+	switch value {
+	case accountdomain.ProviderWeb:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityChat, modeldomain.CapabilityImage, modeldomain.CapabilityImageEdit, modeldomain.CapabilityVideo}
+		definition.Quota = provider.QuotaRemoteWindow
+		definition.Credential = provider.CredentialSurface{AuthType: accountdomain.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, StoredResponses: true}
+		definition.Media = provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated, RetryForbiddenAsEgress: true}
+	case accountdomain.ProviderConsole:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaLocalWindow
+		definition.Credential = provider.CredentialSurface{AuthType: accountdomain.AuthTypeSSO, Import: true}
+		definition.Conversation = provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated}
+	}
+	return definition
+}
+
 
 func (a *countingAdapter) ListModels(context.Context, accountdomain.Credential) ([]string, error) {
 	a.mu.Lock()

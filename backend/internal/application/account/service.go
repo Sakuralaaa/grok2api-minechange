@@ -1013,17 +1013,22 @@ func (s *Service) MarkReauthRequired(ctx context.Context, id uint64, reason stri
 	}
 	value.AuthStatus = accountdomain.AuthStatusReauthRequired
 	value.LastError = reason
-	if len(value.LastError) > 512 {
-		value.LastError = value.LastError[:512]
-	}
 	if _, err := s.accounts.Update(ctx, value); err != nil {
 		return mapRepositoryError(err)
 	}
-	if s.sticky != nil {
-		_ = s.sticky.DeleteByAccount(ctx, id)
+	// Build 账号若仍有 refresh token，标记失效后继续进入后台自动恢复队列，而不是永久躺尸。
+	// 真正 invalid_grant / 无 refresh token 的号无法自动恢复，保持 reauth 等待人工处理。
+	if value.Provider == accountdomain.ProviderBuild && value.EncryptedRefreshToken != "" {
+		now := s.now()
+		if err := s.accounts.UpdateCredentialRefreshFailure(ctx, id, value.RefreshFailureCount, now, "reauth_recovery_pending"); err != nil {
+			s.logger.Warn("credential_reauth_schedule_failed", "account_id", id, "error", err)
+		}
+		s.clearRefreshState(id)
+		s.WakeCredentialRefresh()
 	}
 	return nil
 }
+
 
 // EnsureCredential 在即将过期时刷新 token，同一账号并发请求只执行一次刷新。
 func (s *Service) EnsureCredential(ctx context.Context, value accountdomain.Credential, force bool) (accountdomain.Credential, error) {
@@ -1148,6 +1153,8 @@ func (s *Service) RefreshToken(ctx context.Context, id uint64) (View, error) {
 	if err != nil {
 		return View{}, mapRepositoryError(err)
 	}
+	// 手动刷新绕过进程内节流，确保一定发起上游 OAuth。
+	s.clearRefreshState(id)
 	if _, err := s.ensureCredential(ctx, value, true, true, false); err != nil {
 		return View{}, err
 	}
@@ -1691,31 +1698,72 @@ func (s *Service) SyncWebQuotaAccounts(ctx context.Context, ids []uint64) (int, 
 	})
 }
 
-// RefreshAllTokens 续期全部可刷新的 Grok Build 凭据，不可续期账号会被跳过。
+// RefreshAllTokens 强制续期全部可刷新的 Grok Build 凭据。
+// 包含 active 与 reauthRequired 账号，只要仍持有 refresh token 就会尝试刷新。
 func (s *Service) RefreshAllTokens(ctx context.Context) (int, int, int, error) {
 	return s.RefreshAllTokensWithProgress(ctx, nil)
 }
 
 func (s *Service) RefreshAllTokensWithProgress(ctx context.Context, progress BatchProgressObserver) (int, int, int, error) {
-	allIDs, err := s.accounts.ListEnabledAccountIDs(ctx, accountdomain.ProviderBuild, false)
+	activeIDs, err := s.accounts.ListEnabledAccountIDs(ctx, accountdomain.ProviderBuild, false)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	ids, err := s.accounts.ListEnabledAccountIDs(ctx, accountdomain.ProviderBuild, true)
+	ids, err := s.accounts.ListTokenRefreshAccountIDs(ctx, accountdomain.ProviderBuild)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	skipped := max(0, len(allIDs)-len(ids))
+	activeSet := make(map[uint64]struct{}, len(activeIDs))
+	for _, id := range activeIDs {
+		activeSet[id] = struct{}{}
+	}
+	allCount := len(activeIDs)
+	for _, id := range ids {
+		if _, ok := activeSet[id]; !ok {
+			allCount++
+		}
+	}
+	skipped := max(0, allCount-len(ids))
 	succeeded, failed, err := s.refreshTokens(ctx, ids, progress)
+	return succeeded, failed, skipped, err
+}
+
+// BatchRefreshTokens 强制刷新选中的 Grok Build 凭据。
+func (s *Service) BatchRefreshTokens(ctx context.Context, ids []uint64) (int, int, int, error) {
+	return s.BatchRefreshTokensWithProgress(ctx, ids, nil)
+}
+
+func (s *Service) BatchRefreshTokensWithProgress(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, int, error) {
+	values, err := normalizeBatchIDs(ids)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	refreshable := make([]uint64, 0, len(values))
+	skipped := 0
+	for _, id := range values {
+		value, getErr := s.accounts.Get(ctx, id)
+		if getErr != nil {
+			return 0, 0, 0, mapRepositoryError(getErr)
+		}
+		if value.Provider != accountdomain.ProviderBuild || !value.Enabled || value.EncryptedRefreshToken == "" || value.AuthType == accountdomain.AuthTypeSSO {
+			skipped++
+			continue
+		}
+		refreshable = append(refreshable, id)
+	}
+	succeeded, failed, err := s.refreshTokens(ctx, refreshable, progress)
 	return succeeded, failed, skipped, err
 }
 
 func (s *Service) refreshTokens(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, error) {
 	return s.runAccountBatch(ctx, "credential_refresh", ids, s.refreshPool, progress, func(workCtx context.Context, id uint64) error {
 		value, err := s.accounts.Get(workCtx, id)
-		if err == nil {
-			_, err = s.ensureCredential(workCtx, value, true, true, false)
+		if err != nil {
+			return err
 		}
+		// 手动/批量刷新时清理进程内节流，确保真正请求上游 OAuth。
+		s.clearRefreshState(id)
+		_, err = s.ensureCredential(workCtx, value, true, true, false)
 		return err
 	})
 }

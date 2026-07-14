@@ -32,7 +32,7 @@ var catalog = []ModelSpec{
 
 	// Legacy aliases (callable, not listed)
 	{PublicID: "grok-4.20-0309-non-reasoning-console", UpstreamModel: "grok-4.20-0309-non-reasoning", AliasOf: "grok-4.20-fast-console"},
-	{PublicID: "grok-4.20-0309-console", UpstreamModel: "grok-4.20-0309", AliasOf: "grok-4.20-0309-console"},
+	{PublicID: "grok-4.20-0309-console", UpstreamModel: "grok-4.20-0309", Listed: true},
 	{PublicID: "grok-4.20-0309-reasoning-console", UpstreamModel: "grok-4.20-0309-reasoning", AliasOf: "grok-4.20-expert-console"},
 	{PublicID: "grok-4.20-reasoning-console", UpstreamModel: "grok-4.20-0309-reasoning", AliasOf: "grok-4.20-expert-console"},
 	{PublicID: "grok-4.3-console", UpstreamModel: "grok-4.3", AliasOf: "grok-4.3-medium-console"},
@@ -78,28 +78,30 @@ func ListedRoutes() []modeldomain.Route {
 	return values
 }
 
-// AliasRoutes returns callable alias routes that resolve independently.
-func AliasRoutes() []modeldomain.Route {
-	values := make([]modeldomain.Route, 0)
+// AliasBindings returns console historical public names that resolve to canonical listed routes.
+// Effort and protocol options still follow the requested public id via ResolvePublic.
+func AliasBindings() []modeldomain.AliasBinding {
+	values := make([]modeldomain.AliasBinding, 0)
 	for _, spec := range catalog {
-		if spec.Listed {
+		aliasOf := strings.TrimSpace(spec.AliasOf)
+		if aliasOf == "" || spec.Listed {
 			continue
 		}
-		values = append(values, modeldomain.Route{
-			PublicID:      spec.PublicID,
-			Provider:      account.ProviderConsole,
-			UpstreamModel: spec.UpstreamModel,
-			Capability:    modeldomain.CapabilityResponses,
-			Origin:        modeldomain.OriginManual,
-			Enabled:       true,
+		if aliasOf == strings.TrimSpace(spec.PublicID) {
+			continue
+		}
+		values = append(values, modeldomain.AliasBinding{
+			Alias:             spec.PublicID,
+			CanonicalPublicID: aliasOf,
+			Provider:          account.ProviderConsole,
 		})
 	}
 	return values
 }
 
-// AllRoutes returns listed + alias routes for seeding.
+// AllRoutes returns listed console routes only; aliases are stored separately.
 func AllRoutes() []modeldomain.Route {
-	return append(ListedRoutes(), AliasRoutes()...)
+	return ListedRoutes()
 }
 
 // ResolvePublic returns the console model spec for a public id.

@@ -18,6 +18,7 @@ var schemaModels = []any{
 	&billingModel{},
 	&quotaRecoveryModel{},
 	&modelRouteModel{},
+	&modelRouteAliasModel{},
 	&modelRouteAccountModel{},
 	&accountModelCapabilityModel{},
 	&accountModelSyncStateModel{},
@@ -26,6 +27,7 @@ var schemaModels = []any{
 	&clientKeyModelPermission{},
 	&billingReservationModel{},
 	&requestAuditModel{},
+		&requestAuditAttemptModel{},
 	&responseOwnershipModel{},
 	&webResponseStateModel{},
 	&mediaJobModel{},
@@ -43,6 +45,7 @@ var schemaIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_quota_windows_due ON account_quota_windows(remaining, reset_at, account_id)",
 	"CREATE INDEX IF NOT EXISTS idx_model_routes_created_id ON model_routes(created_at DESC, id DESC)",
 	"CREATE INDEX IF NOT EXISTS idx_model_routes_enabled ON model_routes(enabled, public_id, id)",
+	"CREATE INDEX IF NOT EXISTS idx_model_route_aliases_route ON model_route_aliases(model_route_id, alias)",
 	"CREATE UNIQUE INDEX IF NOT EXISTS uidx_provider_upstream_non_console ON model_routes(provider, upstream_model) WHERE provider <> 'grok_console'",
 	"CREATE INDEX IF NOT EXISTS idx_model_route_accounts_account_route ON model_route_accounts(account_id, model_route_id)",
 	"CREATE INDEX IF NOT EXISTS idx_account_model_quota_blocks_due ON account_model_quota_blocks(cooldown_until, account_id)",
@@ -56,6 +59,7 @@ var schemaIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audits_account_created_id ON request_audits(account_id, created_at DESC, id DESC)",
 	"CREATE INDEX IF NOT EXISTS idx_audits_status_created_id ON request_audits(status_code, created_at DESC, id DESC)",
 	"CREATE INDEX IF NOT EXISTS idx_audits_streaming_created_id ON request_audits(streaming, created_at DESC, id DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_attempts_audit_number ON request_audit_attempts(audit_id, number)",
 	"CREATE INDEX IF NOT EXISTS idx_response_ownership_expires ON response_ownership(expires_at)",
 	"CREATE INDEX IF NOT EXISTS idx_response_ownership_account ON response_ownership(account_id)",
 	"CREATE INDEX IF NOT EXISTS idx_response_ownership_client_key ON response_ownership(client_key_id)",
@@ -105,7 +109,7 @@ func applyPostgresProviderConstraintMigration(db *gorm.DB) error {
 		"ALTER TABLE response_ownership DROP CONSTRAINT IF EXISTS chk_response_ownership_provider",
 		"ALTER TABLE response_ownership ADD CONSTRAINT chk_response_ownership_provider CHECK (provider IN ('grok_build','grok_web','grok_console'))",
 		"ALTER TABLE egress_nodes DROP CONSTRAINT IF EXISTS chk_egress_nodes_specific_scope",
-		"ALTER TABLE egress_nodes ADD CONSTRAINT chk_egress_nodes_specific_scope CHECK (scope IN ('global','grok_build','grok_web','grok_web_asset'))",
+		"ALTER TABLE egress_nodes ADD CONSTRAINT chk_egress_nodes_specific_scope CHECK (scope IN ('global','grok_build','grok_web','grok_console','grok_web_asset'))",
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {

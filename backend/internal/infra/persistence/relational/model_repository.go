@@ -124,8 +124,25 @@ func (r *ModelRepository) Get(ctx context.Context, id uint64) (model.Route, erro
 }
 
 func (r *ModelRepository) GetByPublicID(ctx context.Context, publicID string) (model.Route, error) {
+	publicID = strings.TrimSpace(publicID)
+	if publicID == "" {
+		return model.Route{}, repository.ErrNotFound
+	}
 	var row modelRouteModel
-	if err := r.availableRoutes(r.db.db.WithContext(ctx)).Where("public_id = ? AND enabled = ?", publicID, true).First(&row).Error; err != nil {
+	query := r.availableRoutes(r.db.db.WithContext(ctx))
+	err := query.Where("public_id = ? AND enabled = ?", publicID, true).First(&row).Error
+	if err == nil {
+		return toModelDomain(row), nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Route{}, mapError(err)
+	}
+	// Alias resolution: historical public names map to the canonical enabled route.
+	err = r.availableRoutes(r.db.db.WithContext(ctx)).
+		Joins("JOIN model_route_aliases alias ON alias.model_route_id = model_routes.id").
+		Where("alias.alias = ? AND model_routes.enabled = ?", publicID, true).
+		First(&row).Error
+	if err != nil {
 		return model.Route{}, mapError(err)
 	}
 	return toModelDomain(row), nil
@@ -275,6 +292,9 @@ func (r *ModelRepository) UpsertRoutes(ctx context.Context, values []model.Route
 			if value.Provider == account.ProviderWeb {
 				fallbackOrigin = model.OriginCatalog
 			}
+			if err := ensureModelPublicIDNotAlias(tx, value.PublicID, 0); err != nil {
+				return err
+			}
 			row := modelRouteModel{PublicID: value.PublicID, Provider: string(value.Provider), UpstreamModel: value.UpstreamModel, Capability: string(value.Capability), Origin: string(normalizeRouteOrigin(value.Origin, fallbackOrigin)), Enabled: value.Enabled}
 			if err := tx.Create(&row).Error; err != nil {
 				return mapError(err)
@@ -380,6 +400,9 @@ func (r *ModelRepository) Create(ctx context.Context, value model.Route, account
 		Capability: string(value.Capability), Origin: string(model.OriginManual), Enabled: value.Enabled,
 	}
 	err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureModelPublicIDNotAlias(tx, value.PublicID, 0); err != nil {
+			return err
+		}
 		if err := tx.Create(&row).Error; err != nil {
 			return mapError(err)
 		}
@@ -396,6 +419,22 @@ func (r *ModelRepository) Create(ctx context.Context, value model.Route, account
 
 func (r *ModelRepository) Update(ctx context.Context, value model.Route, accountIDs *[]uint64) (model.Route, error) {
 	err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing modelRouteModel
+		if err := tx.Where("id = ?", value.ID).First(&existing).Error; err != nil {
+			return mapError(err)
+		}
+		if err := ensureModelPublicIDNotAlias(tx, value.PublicID, value.ID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(existing.PublicID) != strings.TrimSpace(value.PublicID) {
+			if err := preserveModelRouteAlias(tx, existing.PublicID, value.ID); err != nil {
+				return err
+			}
+			// Drop alias that equals the new canonical public id for this route.
+			if err := tx.Where("alias = ? AND model_route_id = ?", value.PublicID, value.ID).Delete(&modelRouteAliasModel{}).Error; err != nil {
+				return err
+			}
+		}
 		result := tx.Model(&modelRouteModel{}).Where("id = ?", value.ID).Updates(map[string]any{
 			"public_id": value.PublicID,
 			"enabled":   value.Enabled,

@@ -1,4 +1,4 @@
-package gateway
+﻿package gateway
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	inferencedomain "github.com/chenyme/grok2api/backend/internal/domain/inference"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
+	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"
@@ -32,6 +33,8 @@ var (
 	ErrNoAvailableAccount         = errors.New("没有可用上游账号")
 	ErrResponseNotFound           = errors.New("Response 不存在或已过期")
 	ErrResponseAccountUnavailable = errors.New("Response 绑定的上游账号不可用")
+	ErrResponseStateUnsupported   = errors.New("目标模型不支持有状态 Response")
+	ErrConversationUnsupported    = errors.New("目标模型不支持当前对话协议")
 )
 
 const maxRetryableBodyBytes = 64 << 10
@@ -149,6 +152,7 @@ func (s *Service) CompactResponse(ctx context.Context, input Input) (*Result, er
 }
 
 func (s *Service) createResponseAt(ctx context.Context, input Input, path string) (*Result, error) {
+	ctx, egressTrace := infraegress.WithTrace(ctx)
 	startedAt := time.Now()
 	eventID := newAuditEventID()
 	route, err := s.models.GetByPublicID(ctx, input.PublicModel)
@@ -167,12 +171,12 @@ func (s *Service) createResponseAt(ctx context.Context, input Input, path string
 		operation = audit.OperationResponses
 	}
 	usageSource := audit.UsageSourceUpstream
-	if route.Provider == accountdomain.ProviderWeb || route.Provider == accountdomain.ProviderConsole {
+	if usageKind, _ := s.providers.UsageKind(route.Provider); usageKind == provider.UsageEstimated {
 		usageSource = audit.UsageSourceEstimated
 	}
 	auditBase := audit.Record{
 		EventID: eventID, RequestID: input.RequestID, ClientKeyID: input.ClientKey.ID, ClientKeyName: input.ClientKey.Name,
-		ModelRouteID: route.ID, ModelPublicID: route.PublicID, ModelUpstreamModel: route.UpstreamModel,
+		ModelRouteID: route.ID, ModelPublicID: input.PublicModel, ModelUpstreamModel: route.UpstreamModel,
 		Provider: string(route.Provider), Operation: operation, UsageSource: usageSource, Streaming: input.Streaming,
 	}
 	if !s.clientKeys.CanUseModel(input.ClientKey, route.ID) {
@@ -181,14 +185,25 @@ func (s *Service) createResponseAt(ctx context.Context, input Input, path string
 		record.DurationMS = time.Since(startedAt).Milliseconds()
 		record.ErrorCode = "model_not_allowed"
 		record.CreatedAt = time.Now().UTC()
+		applyAuditEgress(&record, egressTrace, route.Provider)
 		if err := s.audits.Create(ctx, record); err != nil {
 			s.logger.Error("request_usage_write_failed", "event_id", record.EventID, "request_id", input.RequestID, "error", err)
 		}
 		return nil, clientkeyapp.ErrModelNotAllowed
 	}
+	if !s.providers.SupportsConversation(route.Provider, string(operation)) {
+		return nil, ErrConversationUnsupported
+	}
+	if path == "/responses/compact" && !s.providers.SupportsResponseCompaction(route.Provider) {
+		return nil, ErrConversationUnsupported
+	}
 	adapter, ok := s.providers.Responses(route.Provider)
 	if !ok {
 		return nil, ErrNoAvailableAccount
+	}
+	supportsStoredResponses := s.providers.SupportsStoredResponses(route.Provider)
+	if input.PreviousResponseID != "" && !supportsStoredResponses {
+		return nil, ErrResponseStateUnsupported
 	}
 	attempts := int(s.maxAttempts.Load())
 	if attempts <= 0 {
@@ -216,13 +231,14 @@ func (s *Service) createResponseAt(ctx context.Context, input Input, path string
 	excluded := make(map[uint64]bool)
 	failureFingerprints := make(map[string]int)
 	authRecoveryAttempted := make(map[uint64]bool)
+	failureAttempts := newFailureAttemptRecorder(http.MethodPost, path)
 	quotaMode := s.providers.QuotaMode(route.Provider, route.UpstreamModel)
 	quotaProbeAttempted := false
 	var lastErr error
 	var lastFailure *UpstreamFailure
 	forwardResponse := func(credential accountdomain.Credential) (*provider.Response, error) {
 		started := time.Now()
-		response, err := adapter.ForwardResponse(ctx, provider.ResponseResourceRequest{Credential: credential, Method: http.MethodPost, Path: path, Model: route.UpstreamModel, PublicModel: route.PublicID, PromptCacheKey: input.PromptCacheKey, IdempotencyID: idempotencyID, Body: input.Body, Streaming: input.Streaming, NormalizeBody: true, Operation: string(operation)})
+		response, err := adapter.ForwardResponse(ctx, provider.ResponseResourceRequest{Credential: credential, Method: http.MethodPost, Path: path, Model: route.UpstreamModel, PublicModel: input.PublicModel, PromptCacheKey: input.PromptCacheKey, IdempotencyID: idempotencyID, Body: input.Body, Streaming: input.Streaming, NormalizeBody: true, Operation: string(operation)})
 		timing.markUpstream(time.Since(started))
 		return response, err
 	}
@@ -270,9 +286,11 @@ attemptLoop:
 			lease.Release()
 			lastErr = err
 			lastFailure = newCredentialUpstreamFailure(err, lease.Credential.ID, lease.Credential.Name)
+			failureAttempts.captureCredentialFailure(lease.Credential, startedAt, false, err)
 			continue
 		}
 		response, err := forwardResponse(credential)
+		err = failureAttempts.captureResponse(credential, startedAt, response, err)
 		if err != nil {
 			lease.Release()
 			lastErr = err
@@ -302,6 +320,7 @@ attemptLoop:
 			refreshed, refreshErr := ensureCredential(credential, true)
 			if refreshErr == nil {
 				response, err = forwardResponse(refreshed)
+				err = failureAttempts.captureResponse(refreshed, startedAt, response, err)
 				credential = refreshed
 			}
 			if refreshErr != nil || err != nil {
@@ -327,15 +346,16 @@ attemptLoop:
 				continue
 			}
 		}
-		finalWebAntiBot := credential.Provider == accountdomain.ProviderWeb && response.StatusCode == http.StatusForbidden && (attempt > 0 || attempt+1 >= attempts)
-		if isRetryable(response.StatusCode) && !finalWebAntiBot {
+		egressForbidden := s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden
+		finalEgressForbidden := egressForbidden && (attempt > 0 || attempt+1 >= attempts)
+		if isRetryable(response.StatusCode) && !finalEgressForbidden {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
-			if credential.Provider == accountdomain.ProviderWeb && response.StatusCode == http.StatusForbidden {
-				// Web 403/code 7 表示出口浏览器会话被拒绝；Provider 已重建会话并降低节点健康，不应误伤账号。
+			if egressForbidden {
+				// 403 表示出口浏览器会话被拒绝；Provider 已重建会话并降低节点健康，不应误伤账号。
 				delete(excluded, credential.ID)
 				lease.Release()
-				lastErr = fmt.Errorf("Grok Web 出口会话被反机器人规则拒绝")
+				lastErr = fmt.Errorf("上游出口会话被反机器人规则拒绝")
 				lastFailure = newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
 				continue
 			}
@@ -350,6 +370,7 @@ attemptLoop:
 					continue attemptLoop
 				}
 				response, err = forwardResponse(refreshed)
+				err = failureAttempts.captureResponse(refreshed, startedAt, response, err)
 				credential = refreshed
 				if err != nil {
 					lease.Release()
@@ -364,12 +385,10 @@ attemptLoop:
 				goto handleResponse
 			}
 			failureHandled := false
-			if credential.Provider == accountdomain.ProviderWeb || credential.Provider == accountdomain.ProviderConsole {
-				if lease.QuotaMode != "" && response.StatusCode == http.StatusTooManyRequests {
-					exhausted, reconcileErr := s.accounts.ReconcileWebRateLimit(ctx, credential.ID, lease.QuotaMode, retryAfter)
-					s.selector.MarkQuotaStateChanged(credential.Provider)
-					failureHandled = reconcileErr == nil && exhausted
-				}
+			if quotaKind, _ := s.providers.QuotaKind(credential.Provider); (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && lease.QuotaMode != "" && response.StatusCode == http.StatusTooManyRequests {
+				exhausted, reconcileErr := s.accounts.ReconcileWebRateLimit(ctx, credential.ID, lease.QuotaMode, retryAfter)
+				s.selector.MarkQuotaStateChanged(credential.Provider)
+				failureHandled = reconcileErr == nil && exhausted
 			} else if used, limit, exhausted := parseFreeQuotaExhaustion(body); exhausted {
 				s.selector.MarkFreeQuotaExhausted(ctx, credential, used, limit)
 				failureHandled = true
@@ -451,13 +470,15 @@ attemptLoop:
 				record.DurationMS = time.Since(startedAt).Milliseconds()
 				record.ErrorCode = errorCode
 				record.CreatedAt = now
+				finalizeAuditRecord(&record, failureAttempts.snapshot(), egressTrace, route.Provider)
 				if err := s.audits.Create(persistCtx, record); err != nil {
 					s.logger.Error("request_usage_write_failed", "event_id", record.EventID, "request_id", input.RequestID, "error", err)
 				}
 				if usage.ResponseModel != "" {
 					_ = s.accounts.ObserveResponseModel(persistCtx, accountID, usage.ResponseModel)
 				}
-				if response.StatusCode >= 200 && response.StatusCode < 300 && errorCode == "" && (credential.Provider == accountdomain.ProviderWeb || credential.Provider == accountdomain.ProviderConsole) && lease.QuotaMode != "" {
+				quotaKind, _ := s.providers.QuotaKind(credential.Provider)
+				if response.StatusCode >= 200 && response.StatusCode < 300 && errorCode == "" && (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && lease.QuotaMode != "" {
 					if lease.QuotaMode != "weekly" {
 						units := max(1, response.QuotaUnits)
 						updated, err := s.accounts.DecrementWebQuota(persistCtx, accountID, lease.QuotaMode, units)
@@ -467,9 +488,11 @@ attemptLoop:
 							s.selector.ConsumeQuota(credential.Provider, accountID, lease.QuotaMode, units)
 						}
 					}
-					s.accounts.QueueWebQuotaRefresh(accountID, lease.QuotaMode)
+					if quotaKind == provider.QuotaRemoteWindow {
+						s.accounts.QueueWebQuotaRefresh(accountID, lease.QuotaMode)
+					}
 				}
-				if operation == audit.OperationResponses && responseID != "" && response.StatusCode >= 200 && response.StatusCode < 300 {
+				if supportsStoredResponses && operation == audit.OperationResponses && responseID != "" && response.StatusCode >= 200 && response.StatusCode < 300 {
 					_ = s.responses.Save(persistCtx, inferencedomain.ResponseOwnership{ResponseID: responseID, AccountID: accountID, ClientKeyID: input.ClientKey.ID, Provider: route.Provider, ExpiresAt: now.Add(responseOwnershipTTL), CreatedAt: now, UpdatedAt: now})
 				}
 				outcome := "failed"
@@ -494,6 +517,7 @@ attemptLoop:
 			record.AccountID = &accountID
 			record.AccountName = lastFailure.AccountName
 		}
+		finalizeAuditRecord(&record, failureAttempts.snapshot(), egressTrace, route.Provider)
 		persistCtx, cancel := context.WithTimeout(context.Background(), finalizationTimeout)
 		defer cancel()
 		if err := s.audits.Create(persistCtx, record); err != nil {
@@ -509,6 +533,7 @@ attemptLoop:
 	record.DurationMS = time.Since(startedAt).Milliseconds()
 	record.ErrorCode = "upstream_unavailable"
 	record.CreatedAt = time.Now().UTC()
+	finalizeAuditRecord(&record, failureAttempts.snapshot(), egressTrace, route.Provider)
 	persistCtx, cancel := context.WithTimeout(context.Background(), finalizationTimeout)
 	defer cancel()
 	if err := s.audits.Create(persistCtx, record); err != nil {
@@ -567,6 +592,7 @@ func (s *Service) EditImage(ctx context.Context, input ImageEditInput) (*Result,
 }
 
 func (s *Service) executeImage(ctx context.Context, requestID string, key clientkey.Key, publicModel string, operation audit.Operation, execute func(provider.ImageAdapter, accountdomain.Credential, string) (*provider.Response, error), streaming bool, resolution string, requestedCount, inputImageCount int) (*Result, error) {
+	ctx, egressTrace := infraegress.WithTrace(ctx)
 	startedAt := time.Now()
 	eventID := newAuditEventID()
 	route, err := s.models.GetByPublicID(ctx, publicModel)
@@ -632,13 +658,13 @@ func (s *Service) executeImage(ctx context.Context, requestID string, key client
 			lease.Release()
 			return nil, err
 		}
-		if credential.Provider == accountdomain.ProviderWeb && response.StatusCode == http.StatusForbidden && attempt == 0 && attempt+1 < attempts {
+		if s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden && attempt == 0 && attempt+1 < attempts {
 			_, _ = readRetryableBody(response.Body)
 			lease.Release()
 			delete(excluded, credential.ID)
 			continue
 		}
-		if (credential.Provider == accountdomain.ProviderWeb || credential.Provider == accountdomain.ProviderConsole) && response.StatusCode == http.StatusTooManyRequests && lease.QuotaMode != "" {
+		if quotaKind, _ := s.providers.QuotaKind(credential.Provider); (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && response.StatusCode == http.StatusTooManyRequests && lease.QuotaMode != "" {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			exhausted, reconcileErr := s.accounts.ReconcileWebRateLimit(ctx, credential.ID, lease.QuotaMode, retryAfter)
 			s.selector.MarkQuotaStateChanged(credential.Provider)
@@ -695,10 +721,12 @@ func (s *Service) executeImage(ctx context.Context, requestID string, key client
 					record.PricingVersion = audit.OfficialPricingAsOf
 				}
 			}
+			applyAuditEgress(&record, egressTrace, route.Provider)
 			if err := s.audits.Create(persistCtx, record); err != nil {
 				s.logger.Error("request_usage_write_failed", "event_id", record.EventID, "request_id", requestID, "error", err)
 			}
-			if response.StatusCode >= 200 && response.StatusCode < 300 && errorCode == "" && (route.Provider == accountdomain.ProviderWeb || route.Provider == accountdomain.ProviderConsole) && effectiveQuotaMode != "" {
+			quotaKind, _ := s.providers.QuotaKind(route.Provider)
+			if response.StatusCode >= 200 && response.StatusCode < 300 && errorCode == "" && (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && effectiveQuotaMode != "" {
 				if effectiveQuotaMode != "weekly" {
 					units := max(1, response.QuotaUnits)
 					updated, err := s.accounts.DecrementWebQuota(persistCtx, accountID, effectiveQuotaMode, units)
@@ -708,7 +736,9 @@ func (s *Service) executeImage(ctx context.Context, requestID string, key client
 						s.selector.ConsumeQuota(route.Provider, accountID, effectiveQuotaMode, units)
 					}
 				}
-				s.accounts.QueueWebQuotaRefresh(accountID, effectiveQuotaMode)
+				if quotaKind == provider.QuotaRemoteWindow {
+					s.accounts.QueueWebQuotaRefresh(accountID, effectiveQuotaMode)
+				}
 			}
 		})
 	}
@@ -743,6 +773,10 @@ func (s *Service) DeleteResponse(ctx context.Context, input ResourceInput) (*Res
 func (s *Service) forwardOwnedResponse(ctx context.Context, input ResourceInput, method string) (*Result, error) {
 	ownership, err := s.responses.Get(ctx, input.ResponseID, input.ClientKey.ID, time.Now().UTC())
 	if err != nil {
+		return nil, ErrResponseNotFound
+	}
+	if !s.providers.SupportsStoredResponses(ownership.Provider) {
+		_ = s.responses.Delete(ctx, input.ResponseID, input.ClientKey.ID)
 		return nil, ErrResponseNotFound
 	}
 	adapter, ok := s.providers.Responses(ownership.Provider)
@@ -856,3 +890,15 @@ func firstError(values ...error) error {
 	}
 	return errors.New("未知上游错误")
 }
+
+func finalizeAuditRecord(record *audit.Record, attempts []audit.Attempt, egressTrace *infraegress.Trace, providerValue accountdomain.Provider) {
+	if record == nil {
+		return
+	}
+	if len(attempts) > 0 {
+		record.Attempts = attempts
+		record.AttemptCount = len(attempts)
+	}
+	applyAuditEgress(record, egressTrace, providerValue)
+}
+

@@ -1,4 +1,4 @@
-package repository
+﻿package repository
 
 import (
 	"context"
@@ -26,6 +26,7 @@ type AccountRepository interface {
 	Summarize(ctx context.Context, now time.Time) ([]AccountSummary, error)
 	ListEnabled(ctx context.Context, provider account.Provider) ([]account.Credential, error)
 	ListEnabledAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error)
+	ListTokenRefreshAccountIDs(ctx context.Context, provider account.Provider) ([]uint64, error)
 	ListUnlinkedWebAccountIDs(ctx context.Context, limit int) ([]uint64, error)
 	HasActive(ctx context.Context, provider account.Provider) (bool, error)
 	ListRoutingCandidates(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) ([]account.RoutingCandidate, error)

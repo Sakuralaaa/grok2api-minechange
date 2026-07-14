@@ -1,5 +1,6 @@
 import { runtimeConfig } from "@/shared/config/runtime-config";
 import { i18n } from "@/shared/i18n";
+import type { ApiDecoder } from "@/shared/api/decoder";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -43,15 +44,17 @@ function localizedErrorMessage(code: string, fallback: string): string {
   return i18n.exists(key) ? i18n.t(key) : fallback;
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
+async function parseResponse<T>(response: Response, decode?: ApiDecoder<T>): Promise<T> {
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = readErrorEnvelope(payload);
-    const code = error.code ?? "requestFailed";
-    throw new ApiError(response.status, code, localizedErrorMessage(code, error.message ?? `HTTP ${response.status}`), error.requestId);
+    const envelope = readErrorEnvelope(payload);
+    throw new ApiError(response.status, envelope.code ?? "requestFailed", localizedErrorMessage(envelope.code ?? "", envelope.message ?? i18n.t("apiErrors.requestFailed")), envelope.requestId);
   }
   if (!isRecord(payload) || !("data" in payload)) {
-    throw new ApiError(response.status, "invalidResponse", localizedErrorMessage("invalidResponse", "Server returned an invalid response"));
+    throw new ApiError(response.status, "invalidResponse", i18n.t("apiErrors.invalidResponse"));
+  }
+  if (decode) {
+    return decode(payload.data);
   }
   return payload.data as T;
 }
@@ -140,7 +143,7 @@ async function sendApiRequest(path: string, options: RequestOptions): Promise<Re
   });
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function apiRequest<T>(path: string, options: RequestOptions = {}, decode?: ApiDecoder<T>): Promise<T> {
   const { authenticated = true, retryAuth = true } = options;
   const response = await sendApiRequest(path, options);
 
@@ -154,7 +157,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     }
   }
 
-  return parseResponse<T>(response);
+  return parseResponse<T>(response, decode);
 }
 
 export type ApiStreamEvent<T> = {

@@ -15,6 +15,7 @@ func TestFallbackScopesIncludeGlobal(t *testing.T) {
 		{scope: domain.ScopeBuild, want: []domain.Scope{domain.ScopeBuild, domain.ScopeGlobal}},
 		{scope: domain.ScopeWeb, want: []domain.Scope{domain.ScopeWeb, domain.ScopeGlobal}},
 		{scope: domain.ScopeWebAsset, want: []domain.Scope{domain.ScopeWebAsset, domain.ScopeWeb, domain.ScopeGlobal}},
+		{scope: domain.ScopeConsole, want: []domain.Scope{domain.ScopeConsole, domain.ScopeWeb, domain.ScopeGlobal}},
 	}
 	for _, test := range tests {
 		if got := fallbackScopes(test.scope); !reflect.DeepEqual(got, test.want) {

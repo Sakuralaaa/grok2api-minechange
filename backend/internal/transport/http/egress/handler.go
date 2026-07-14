@@ -66,7 +66,7 @@ func (value nodeRequest) input() egressapp.Input {
 
 func (h *Handler) list(c *gin.Context) {
 	scope := egressdomain.Scope(c.Query("scope"))
-	if scope != "" && scope != egressdomain.ScopeGlobal && scope != egressdomain.ScopeBuild && scope != egressdomain.ScopeWeb && scope != egressdomain.ScopeWebAsset {
+	if scope != "" && scope != egressdomain.ScopeGlobal && scope != egressdomain.ScopeBuild && scope != egressdomain.ScopeWeb && scope != egressdomain.ScopeConsole && scope != egressdomain.ScopeWebAsset {
 		response.Error(c, http.StatusBadRequest, "invalidEgressScope", "scope 必须是 grok_build、grok_web 或 grok_web_asset")
 		return
 	}

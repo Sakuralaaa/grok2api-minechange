@@ -650,6 +650,120 @@ func runQuotaRefreshWorkers(t *testing.T, service *accountapp.Service) {
 	})
 }
 
+
+
+func TestGatewayRejectsUnsupportedConversationCapabilities(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "gateway-capability.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	keyRepo := relational.NewClientKeyRepository(database)
+	consoleAccount, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderConsole, AuthType: account.AuthTypeSSO, Name: "console", SourceKey: "console-cap",
+		EncryptedAccessToken: "encrypted", Enabled: true, AuthStatus: account.AuthStatusActive, Priority: 1, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "grok-console-stateless-console", Provider: account.ProviderConsole, UpstreamModel: "grok-console",
+		Capability: modeldomain.CapabilityResponses, Origin: modeldomain.OriginManual, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.ReplaceAccountCapabilities(ctx, consoleAccount.ID, []string{"grok-console"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	clientKey, err := keyRepo.Create(ctx, clientkey.Key{Name: "cap-key", Prefix: "cap-prefix", SecretHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EncryptedSecret: "encrypted-key", Enabled: true, RPMLimit: 120, MaxConcurrent: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := provider.NewRegistry(statelessConsoleAdapter{})
+	sticky := memory.NewStickyStore()
+	concurrency := memory.NewConcurrencyLimiter()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, concurrency, sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 1)
+
+	if _, err := service.CompactResponse(ctx, Input{RequestID: "req-console-compact", ClientKey: clientKey, PublicModel: "grok-console-stateless-console", Body: []byte(`{"model":"grok-console-stateless-console","input":"hello"}`)}); !errors.Is(err, ErrConversationUnsupported) {
+		t.Fatalf("compact error = %v, want ErrConversationUnsupported", err)
+	}
+	if _, err := service.CreateResponse(ctx, Input{RequestID: "req-console-prev", ClientKey: clientKey, PublicModel: "grok-console-stateless-console", PreviousResponseID: "resp-console", Body: []byte(`{"model":"grok-console-stateless-console","previous_response_id":"resp-console"}`)}); !errors.Is(err, ErrResponseStateUnsupported) {
+		t.Fatalf("previous_response error = %v, want ErrResponseStateUnsupported", err)
+	}
+}
+
+type statelessConsoleAdapter struct{}
+
+func (statelessConsoleAdapter) Provider() account.Provider { return account.ProviderConsole }
+func (statelessConsoleAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderConsole)
+}
+func (statelessConsoleAdapter) ListModels(context.Context, account.Credential) ([]string, error) {
+	return []string{"grok-console"}, nil
+}
+func (statelessConsoleAdapter) ForwardResponse(context.Context, provider.ResponseResourceRequest) (*provider.Response, error) {
+	return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"console-response"}`))}, nil
+}
+func (statelessConsoleAdapter) ParseImportedCredentials([]byte) ([]provider.CredentialSeed, error) {
+	return nil, nil
+}
+func (statelessConsoleAdapter) MarshalCredentials([]provider.CredentialSeed) ([]byte, error) {
+	return nil, nil
+}
+func (statelessConsoleAdapter) QuotaMode(string) string { return "console" }
+func (statelessConsoleAdapter) TierOrder(string) []account.WebTier { return nil }
+func (statelessConsoleAdapter) SyncQuota(context.Context, account.Credential) (provider.QuotaSnapshot, error) {
+	return provider.QuotaSnapshot{}, nil
+}
+func (statelessConsoleAdapter) SyncQuotaMode(context.Context, account.Credential, string) (account.QuotaWindow, error) {
+	return account.QuotaWindow{}, nil
+}
+
+func testConversationDefinition(value account.Provider) provider.Definition {
+	definition := provider.Definition{
+		Provider:       value,
+		ModelNamespace: value.ModelNamespace(),
+		ModelCatalog:   provider.ModelCatalogStatic,
+		Credential:     provider.CredentialSurface{AuthType: account.AuthTypeSSO, Import: true},
+		Conversation:   provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true},
+		Inference:      provider.InferencePolicy{Usage: provider.UsageEstimated},
+	}
+	switch value {
+	case account.ProviderBuild:
+		definition.ModelCatalog = provider.ModelCatalogRemote
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaBilling
+		definition.Credential = provider.CredentialSurface{AuthType: account.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true}
+		definition.Conversation.Compact = true
+		definition.Conversation.StoredResponses = true
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageUpstream}
+	case account.ProviderWeb:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityChat, modeldomain.CapabilityImage, modeldomain.CapabilityImageEdit, modeldomain.CapabilityVideo}
+		definition.Quota = provider.QuotaRemoteWindow
+		definition.Conversation.StoredResponses = true
+		definition.Media = provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true}
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated, RetryForbiddenAsEgress: true}
+	case account.ProviderConsole:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaLocalWindow
+		definition.Inference = provider.InferencePolicy{Usage: provider.UsageEstimated}
+	default:
+		definition.ModelCapabilities = []modeldomain.Capability{modeldomain.CapabilityResponses}
+		definition.Quota = provider.QuotaBilling
+	}
+	return definition
+}
+
 type failoverAdapter struct {
 	mu             sync.Mutex
 	firstID        uint64
@@ -670,6 +784,9 @@ type authRescueAdapter struct {
 }
 
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
+func (a *authRescueAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderBuild)
+}
 func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
 	a.attempts.Add(1)
 	if request.Credential.EncryptedAccessToken == "access-old" {
@@ -686,6 +803,9 @@ func (a *authRescueAdapter) RefreshCredential(context.Context, account.Credentia
 }
 
 func (a *systemicForbiddenAdapter) Provider() account.Provider { return account.ProviderBuild }
+func (a *systemicForbiddenAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderBuild)
+}
 func (a *systemicForbiddenAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
 	a.mu.Lock()
 	a.attempts = append(a.attempts, request.Credential.ID)
@@ -715,6 +835,9 @@ type webChatQuotaAdapter struct {
 }
 
 func (webRateLimitAdapter) Provider() account.Provider { return account.ProviderWeb }
+func (webRateLimitAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderWeb)
+}
 func (webRateLimitAdapter) QuotaMode(string) string    { return "fast" }
 func (webRateLimitAdapter) TierOrder(string) []account.WebTier {
 	return []account.WebTier{account.WebTierBasic, account.WebTierSuper, account.WebTierHeavy}
@@ -726,6 +849,9 @@ func (webRateLimitAdapter) ForwardResponse(context.Context, provider.ResponseRes
 }
 
 func (a *webImageStreamAdapter) Provider() account.Provider { return account.ProviderWeb }
+func (a *webImageStreamAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderWeb)
+}
 func (a *webImageStreamAdapter) QuotaMode(model string) string {
 	if model == "grok-imagine-image" {
 		return "fast"
@@ -780,6 +906,9 @@ func (a *webImageStreamAdapter) SyncQuotaMode(_ context.Context, credential acco
 }
 
 func (a *webChatQuotaAdapter) Provider() account.Provider { return account.ProviderWeb }
+func (a *webChatQuotaAdapter) Definition() provider.Definition {
+	return testConversationDefinition(account.ProviderWeb)
+}
 func (a *webChatQuotaAdapter) QuotaMode(string) string    { return "fast" }
 func (a *webChatQuotaAdapter) TierOrder(string) []account.WebTier {
 	return []account.WebTier{account.WebTierBasic, account.WebTierSuper, account.WebTierHeavy}
@@ -800,6 +929,11 @@ func (a *webChatQuotaAdapter) SyncQuotaMode(_ context.Context, credential accoun
 }
 
 func (a *failoverAdapter) Provider() account.Provider { return account.ProviderBuild }
+func (a *failoverAdapter) Definition() provider.Definition {
+	definition := testConversationDefinition(account.ProviderBuild)
+	definition.Inference = provider.InferencePolicy{Usage: provider.UsageUpstream}
+	return definition
+}
 func (a *failoverAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
 	a.mu.Lock()
 	a.attempts = append(a.attempts, request.Credential.ID)
