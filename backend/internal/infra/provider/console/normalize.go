@@ -14,59 +14,45 @@ var resetDurationPattern = regexp.MustCompile(`(?i)(\d+)\s*([dhms])`)
 func normalizeRequest(body []byte, spec ModelSpec) ([]byte, error) {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("解析 Console Responses 请求: %w", err)
+		return nil, fmt.Errorf("parse Console Responses request: %w", err)
 	}
 	if value, exists := payload["store"]; exists {
 		store, ok := value.(bool)
 		if !ok {
-			return nil, fmt.Errorf("Console store 必须是布尔值")
+			return nil, fmt.Errorf("Console store must be a boolean")
 		}
 		if store {
-			return nil, fmt.Errorf("Grok Console 不支持 store: true；请使用无状态 Responses 输入回放")
+			return nil, fmt.Errorf("Grok Console does not support store: true; use stateless Responses input replay")
 		}
 	}
 	if value, exists := payload["previous_response_id"]; exists && value != nil {
 		previousID, ok := value.(string)
 		if !ok {
-			return nil, fmt.Errorf("Console previous_response_id 必须是字符串")
+			return nil, fmt.Errorf("Console previous_response_id must be a string")
 		}
 		if strings.TrimSpace(previousID) != "" {
-			return nil, fmt.Errorf("Grok Console 不支持 previous_response_id；请回放完整输入")
+			return nil, fmt.Errorf("Grok Console does not support previous_response_id; replay the full input")
 		}
 		delete(payload, "previous_response_id")
 	}
 	payload["model"] = spec.UpstreamModel
 	payload["store"] = false
 	delete(payload, "metadata")
-	if _, exists := payload["max_output_tokens"]; !exists && spec.MaxOutputTokens > 0 {
-		payload["max_output_tokens"] = spec.MaxOutputTokens
-	}
 	normalizeReasoning(payload, spec)
-	if spec.SearchTools {
-		if err := mergeSearchTools(payload); err != nil {
-			return nil, err
-		}
-	}
 	return json.Marshal(payload)
 }
 
 func normalizeReasoning(payload map[string]any, spec ModelSpec) {
-	if !spec.SupportsReasoning {
-		delete(payload, "reasoning")
+	effort := normalizeEffort(spec.Effort)
+	if effort == "" {
+		// Keep caller-provided reasoning only when this public model pins no effort.
 		return
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
 	if reasoning == nil {
 		reasoning = make(map[string]any)
 	}
-	effort, _ := reasoning["effort"].(string)
-	effort = normalizeEffort(effort)
-	if effort == "" {
-		effort = spec.DefaultReasoningEffort
-	}
-	if effort != "" {
-		reasoning["effort"] = effort
-	}
+	reasoning["effort"] = effort
 	payload["reasoning"] = reasoning
 }
 
@@ -76,7 +62,7 @@ func normalizeEffort(value string) string {
 		return "low"
 	case "medium":
 		return "medium"
-	case "high", "xhigh":
+	case "high", "xhigh", "expert":
 		return "high"
 	default:
 		return ""
@@ -93,7 +79,7 @@ func mergeSearchTools(payload map[string]any) error {
 	if value, exists := payload["tools"]; exists && value != nil {
 		tools, ok := value.([]any)
 		if !ok {
-			return fmt.Errorf("Console tools 必须是数组")
+			return fmt.Errorf("Console tools must be an array")
 		}
 		for _, tool := range tools {
 			identity := toolIdentity(tool)

@@ -1218,9 +1218,19 @@ func (s *Service) recordCredentialRefreshFailure(ctx context.Context, credential
 		s.logger.Warn("credential_refresh_state_write_failed", "account_id", credential.ID, "error", err)
 	}
 	if permanent {
-		if err := s.MarkReauthRequired(ctx, credential.ID, "OAuth refresh failed: "+errorCode); err != nil {
+		// Permanent OAuth failures (for example invalid_grant) need manual reauth.
+		// Keep the upstream error code instead of overwriting it with recovery scheduling metadata.
+		latest, err := s.accounts.Get(ctx, credential.ID)
+		if err != nil {
+			s.logger.Warn("credential_refresh_reauth_load_failed", "account_id", credential.ID, "error", err)
+			return
+		}
+		latest.AuthStatus = accountdomain.AuthStatusReauthRequired
+		latest.LastError = "OAuth refresh failed: " + errorCode
+		if _, err := s.accounts.Update(ctx, latest); err != nil {
 			s.logger.Warn("credential_refresh_reauth_mark_failed", "account_id", credential.ID, "error", err)
 		}
+		s.clearRefreshState(credential.ID)
 		return
 	}
 	s.logger.Warn("credential_refresh_deferred", "account_id", credential.ID, "failure_count", failureCount, "retry_at", retryAt, "error_code", errorCode)

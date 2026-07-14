@@ -111,9 +111,12 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 	}
 	if len(available) == 0 {
 		if configured {
-			return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
+			return nil, false, fmt.Errorf("??????? %s ????", scope)
 		}
 		if !allowDirect {
+			// Build may intentionally skip configured proxies and stay on direct transport.
+			// Still record the effective egress mode for request diagnostics.
+			recordSelection(ctx, Selection{NodeID: 0, NodeName: "direct", Scope: scope, Proxied: false})
 			return nil, false, nil
 		}
 		available = []domain.Node{{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}}

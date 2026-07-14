@@ -840,16 +840,14 @@ func (h *Handler) batchRefreshTokens(c *gin.Context) {
 		}
 		return
 	}
-	stream := response.NewTaskStream(c)
-	if stream == nil {
-		return
-	}
+	stream := newAccountEventStream(c)
+	defer stream.Close()
 	succeeded, failed, skipped, err := h.service.BatchRefreshTokensWithProgress(c.Request.Context(), ids, stream.ProgressObserver())
 	if err != nil {
-		stream.Fail("tokenBatchRefreshFailed", err.Error())
+		stream.WriteError("tokenBatchRefreshFailed", err.Error())
 		return
 	}
-	stream.Complete(gin.H{"succeeded": succeeded, "failed": failed, "skipped": skipped})
+	_ = stream.Write("complete", gin.H{"succeeded": succeeded, "failed": failed, "skipped": skipped})
 }
 
 func (h *Handler) refreshToken(c *gin.Context) {
