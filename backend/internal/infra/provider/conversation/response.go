@@ -20,6 +20,7 @@ type responseEnvelope struct {
 	CreatedAt int64          `json:"created_at"`
 	OutputText string        `json:"output_text"`
 	Output    []responseItem `json:"output"`
+	Response  *responseEnvelope `json:"response"`
 	Usage     responseUsage  `json:"usage"`
 	Error     any            `json:"error"`
 }
@@ -108,13 +109,39 @@ func parseResponse(value responseEnvelope) parsedResponse {
 		parsed.CreatedAt = time.Now().Unix()
 	}
 	parsed.Text = value.OutputText
+	if value.Response != nil {
+		nested := parseResponse(*value.Response)
+		if parsed.ID == "" {
+			parsed.ID = nested.ID
+		}
+		if parsed.Model == "" {
+			parsed.Model = nested.Model
+		}
+		if parsed.CreatedAt == 0 {
+			parsed.CreatedAt = nested.CreatedAt
+		}
+		if parsed.Status == "" {
+			parsed.Status = nested.Status
+		}
+		parsed.Text += nested.Text
+		parsed.Reasoning += nested.Reasoning
+		parsed.Signature = firstNonEmpty(parsed.Signature, nested.Signature)
+		parsed.Refusal += nested.Refusal
+		parsed.Calls = append(parsed.Calls, nested.Calls...)
+		if parsed.Usage.InputTokens == 0 && parsed.Usage.OutputTokens == 0 {
+			parsed.Usage = nested.Usage
+		}
+	}
 	for _, item := range value.Output {
+		for _, content := range item.Content {
+			if content.Text != "" {
+				parsed.Text += content.Text
+			}
+		}
 		switch item.Type {
 		case "message":
 			for _, content := range item.Content {
 				switch content.Type {
-				case "output_text":
-					parsed.Text += content.Text
 				case "refusal":
 					parsed.Refusal += content.Refusal
 				}
@@ -131,6 +158,15 @@ func parseResponse(value responseEnvelope) parsedResponse {
 		}
 	}
 	return parsed
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func chatResponse(value parsedResponse) map[string]any {

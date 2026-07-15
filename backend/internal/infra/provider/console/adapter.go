@@ -194,7 +194,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 		if request.Streaming {
 			// Rewrite PublicID + inject synthetic reasoning before protocol conversion.
-			resp.Body = TransformStream(resp.Body, publicID)
+			resp.Body = TransformStreamWithOptions(resp.Body, publicID, request.Operation != conversation.OperationChat)
 			if request.Operation == conversation.OperationChat || request.Operation == conversation.OperationMessages {
 				resp.Body = conversation.ConvertResponseStreamWithOptions(resp.Body, request.Operation, conversationOptions)
 			}

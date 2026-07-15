@@ -17,6 +17,10 @@ const syntheticReasoningText = "已深度思考。"
 // TransformStream rewrites Responses SSE model fields to publicID and injects
 // synthetic reasoning events after the first JSON data frame.
 func TransformStream(source io.ReadCloser, publicID string) io.ReadCloser {
+	return TransformStreamWithOptions(source, publicID, true)
+}
+
+func TransformStreamWithOptions(source io.ReadCloser, publicID string, synthesizeReasoning bool) io.ReadCloser {
 	if source == nil {
 		return source
 	}
@@ -24,7 +28,7 @@ func TransformStream(source io.ReadCloser, publicID string) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
 		defer source.Close()
-		err := transformConsoleStream(writer, source, publicID)
+		err := transformConsoleStream(writer, source, publicID, synthesizeReasoning)
 		_ = writer.CloseWithError(err)
 	}()
 	return reader
@@ -50,7 +54,7 @@ func WrapStream(source io.ReadCloser, publicID string, heartbeatInterval time.Du
 	return HeartbeatStream(TransformStream(source, publicID), heartbeatInterval)
 }
 
-func transformConsoleStream(dst io.Writer, source io.Reader, publicID string) error {
+func transformConsoleStream(dst io.Writer, source io.Reader, publicID string, synthesizeReasoning bool) error {
 	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	syntheticSent := false
@@ -73,7 +77,7 @@ func transformConsoleStream(dst io.Writer, source io.Reader, publicID string) er
 		if _, err := io.WriteString(dst, out+"\n\n"); err != nil {
 			return err
 		}
-		if !syntheticSent && isJSONDataLine(line) {
+		if synthesizeReasoning && !syntheticSent && isJSONDataLine(line) {
 			for _, event := range syntheticResponseReasoningEvents(reasoningID) {
 				if _, err := io.WriteString(dst, event); err != nil {
 					return err

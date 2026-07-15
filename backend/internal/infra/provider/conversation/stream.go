@@ -263,6 +263,9 @@ func (c *streamConverter) fullTextDelta(full string) error {
 
 func responseText(value responseEnvelope) string {
 	text := value.OutputText
+	if value.Response != nil {
+		text += responseText(*value.Response)
+	}
 	for _, item := range value.Output {
 		text += responseItemText(item)
 	}
@@ -270,12 +273,9 @@ func responseText(value responseEnvelope) string {
 }
 
 func responseItemText(item responseItem) string {
-	if item.Type != "message" {
-		return ""
-	}
 	var text strings.Builder
 	for _, content := range item.Content {
-		if content.Type == "output_text" || content.Type == "text" {
+		if content.Text != "" {
 			text.WriteString(content.Text)
 		}
 	}

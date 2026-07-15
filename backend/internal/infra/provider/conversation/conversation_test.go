@@ -408,6 +408,20 @@ func TestConvertResponsesStreamEmitsCompletedMessageText(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesStreamEmitsTextFromUntypedOutputItem(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"status":"completed","output":[{"content":[{"text":"hello from console"}]}]}}`, "", "",
+	}, "\n")
+	converted, err := io.ReadAll(ConvertResponseStream(io.NopCloser(strings.NewReader(stream)), OperationChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(converted), `"content":"hello from console"`) {
+		t.Fatalf("untyped output item text was dropped: %s", converted)
+	}
+}
+
 func TestConvertResponsesStreamEmitsDoneTextEvents(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: response.output_text.done`,
