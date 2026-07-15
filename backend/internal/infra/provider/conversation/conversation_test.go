@@ -427,6 +427,21 @@ func TestConvertResponsesStreamEmitsDoneTextEvents(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesStreamIgnoresFailedEventForChat(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: response.failed`,
+		`data: {"type":"response.failed","error":{"message":"temporary upstream failure"}}`, "",
+	}, "\n")
+	converted, err := io.ReadAll(ConvertResponseStream(io.NopCloser(strings.NewReader(stream)), OperationChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(converted)
+	if !strings.Contains(text, `"finish_reason":"stop"`) || !strings.Contains(text, "data: [DONE]") || strings.Contains(text, `"type":"response.failed"`) {
+		t.Fatalf("failed event should still produce valid chat termination: %s", text)
+	}
+}
+
 func TestConvertResponsesStreamToMessagesThinkingToolsAndStop(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: response.created`,

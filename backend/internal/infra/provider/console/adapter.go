@@ -265,6 +265,11 @@ func (a *Adapter) enrichConsoleBody(body []byte, publicID, upstreamModel string,
 		if _, exists := payload["tools"]; !exists {
 			payload["tools"] = defaultConsoleTools()
 		}
+		if _, exists := payload["tool_choice"]; !exists {
+			if _, toolsExist := payload["tools"]; toolsExist {
+				payload["tool_choice"] = "auto"
+			}
+		}
 	}
 	if modelName == "grok-4.20-multi-agent-0309" {
 		if _, exists := payload["max_output_tokens"]; !exists {

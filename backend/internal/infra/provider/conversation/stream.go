@@ -26,6 +26,9 @@ func ConvertResponseStreamWithOptions(source io.ReadCloser, operation string, op
 		defer source.Close()
 		converter := newStreamConverter(writer, operation, options)
 		err := consumeSSE(source, converter.handle)
+		if err != nil && converter.finished {
+			err = nil
+		}
 		if err == nil {
 			err = converter.finish()
 		}
@@ -170,6 +173,9 @@ func (c *streamConverter) handle(event string, data []byte) error {
 		}
 		return c.done(status)
 	case "error", "response.failed":
+		if c.operation == OperationChat {
+			return nil
+		}
 		return c.streamError(data)
 	}
 	return nil

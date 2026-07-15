@@ -66,6 +66,24 @@ func TestEnrichConsoleBodyDoesNotInferLowFromSharedUpstream(t *testing.T) {
 	}
 }
 
+func TestEnrichConsoleBodyAddsAutomaticToolChoice(t *testing.T) {
+	adapter := NewAdapter(Config{EnableSearchTools: true}, nil, nil)
+	enriched, err := adapter.enrichConsoleBody([]byte(`{}`), "grok-4.3-console", "grok-4.3", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(enriched, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", payload["tool_choice"])
+	}
+	if tools, ok := payload["tools"].([]any); !ok || len(tools) != 2 {
+		t.Fatalf("default tools = %#v", payload["tools"])
+	}
+}
+
 func decodedEffort(t *testing.T, body []byte) string {
 	t.Helper()
 	var payload struct {
