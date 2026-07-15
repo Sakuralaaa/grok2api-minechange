@@ -41,3 +41,11 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPUpstreamFailureClassifiesConsoleModelRateLimit(t *testing.T) {
+	body := []byte(`{"code":"resource-exhausted","error":"Too many requests for team and model grok-4.20-multi-agent-0309. Requests per Minute (actual/limit): 139/60."}`)
+	failure := newHTTPUpstreamFailure(http.StatusTooManyRequests, body, 42, "console")
+	if !failure.AccountScoped || !failure.ModelRateLimited || failure.ModelQuotaExhausted || failure.UpstreamCode != "resource-exhausted" {
+		t.Fatalf("failure = %#v", failure)
+	}
+}

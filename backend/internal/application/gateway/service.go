@@ -43,7 +43,11 @@ const finalizationTimeout = 5 * time.Second
 const textBillingReservationTTL = 2 * time.Hour
 const mediaBillingReservationTTL = 24 * time.Hour
 
-var freeQuotaUsagePattern = regexp.MustCompile(`(?i)tokens\s*\(actual/limit\)\s*:\s*([0-9]+)\s*/\s*([0-9]+)`)
+var (
+	freeQuotaUsagePattern = regexp.MustCompile(`(?i)tokens\s*\(actual/limit\)\s*:\s*([0-9]+)\s*/\s*([0-9]+)`)
+	modelRateLimitPattern = regexp.MustCompile(`(?i)(?:requests|tokens)\s+per\s+minute\s*\(actual/limit\)\s*:\s*[0-9]+\s*/\s*[0-9]+`)
+	resetDurationPattern  = regexp.MustCompile(`(?i)([0-9]+)\s*([dhms])`)
+)
 
 type Input struct {
 	RequestID          string
@@ -351,6 +355,9 @@ attemptLoop:
 		if isRetryable(response.StatusCode) && !finalEgressForbidden {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
+			if inferred := parseRateLimitRetryAfter(body); inferred > retryAfter {
+				retryAfter = inferred
+			}
 			if egressForbidden {
 				// 403 表示出口浏览器会话被拒绝；Provider 已重建会话并降低节点健康，不应误伤账号。
 				delete(excluded, credential.ID)
@@ -385,7 +392,10 @@ attemptLoop:
 				goto handleResponse
 			}
 			failureHandled := false
-			if quotaKind, _ := s.providers.QuotaKind(credential.Provider); (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && lease.QuotaMode != "" && response.StatusCode == http.StatusTooManyRequests {
+			if lastFailure.ModelRateLimited {
+				s.selector.MarkModelRateLimited(ctx, credential, route.UpstreamModel, retryAfter)
+				failureHandled = true
+			} else if quotaKind, _ := s.providers.QuotaKind(credential.Provider); credential.Provider == accountdomain.ProviderWeb && (quotaKind == provider.QuotaRemoteWindow || quotaKind == provider.QuotaLocalWindow) && lease.QuotaMode != "" && response.StatusCode == http.StatusTooManyRequests {
 				exhausted, reconcileErr := s.accounts.ReconcileWebRateLimit(ctx, credential.ID, lease.QuotaMode, retryAfter)
 				s.selector.MarkQuotaStateChanged(credential.Provider)
 				failureHandled = reconcileErr == nil && exhausted
@@ -878,6 +888,34 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 	}
 	if parsed, err := http.ParseTime(value); err == nil && parsed.After(now) {
 		return parsed.Sub(now)
+	}
+	return 0
+}
+
+func parseRateLimitRetryAfter(body []byte) time.Duration {
+	text := string(body)
+	lower := strings.ToLower(text)
+	if index := strings.Index(lower, "resets in:"); index >= 0 {
+		var duration time.Duration
+		for _, match := range resetDurationPattern.FindAllStringSubmatch(text[index+len("resets in:"):], -1) {
+			value, _ := strconv.Atoi(match[1])
+			switch strings.ToLower(match[2]) {
+			case "d":
+				duration += time.Duration(value) * 24 * time.Hour
+			case "h":
+				duration += time.Duration(value) * time.Hour
+			case "m":
+				duration += time.Duration(value) * time.Minute
+			case "s":
+				duration += time.Duration(value) * time.Second
+			}
+		}
+		if duration > 0 {
+			return duration
+		}
+	}
+	if modelRateLimitPattern.Match(body) {
+		return 65 * time.Second
 	}
 	return 0
 }

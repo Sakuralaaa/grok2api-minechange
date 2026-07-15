@@ -23,6 +23,7 @@ type UpstreamFailure struct {
 	QuotaExhausted         bool
 	FreeQuotaExhausted     bool
 	ModelQuotaExhausted    bool
+	ModelRateLimited       bool
 	CredentialRejected     bool
 	Fingerprint            string
 	Cause                  error
@@ -93,6 +94,7 @@ func newHTTPUpstreamFailure(status int, body []byte, accountID uint64, accountNa
 		failure.PublicMessage = "上游请求频率受限"
 		failure.AccountScoped = true
 		failure.ModelQuotaExhausted = isModelQuotaExhaustion(metadataText)
+		failure.ModelRateLimited = isModelRateLimit(metadataText)
 		failure.FreeQuotaExhausted = failure.ModelQuotaExhausted || isFreeQuotaExhaustion(metadataText)
 		failure.QuotaExhausted = failure.FreeQuotaExhausted || isPaidQuotaExhaustion(metadataText)
 	default:
@@ -168,6 +170,10 @@ func isFreeQuotaExhaustion(text string) bool {
 
 func isModelQuotaExhaustion(text string) bool {
 	return strings.Contains(text, "used all the included free usage for model")
+}
+
+func isModelRateLimit(text string) bool {
+	return containsAny(text, "requests per minute", "tokens per minute") && containsAny(text, "resource-exhausted", "too many requests", "rate limit")
 }
 
 func containsAny(text string, signals ...string) bool {

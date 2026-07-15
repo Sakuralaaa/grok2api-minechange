@@ -158,6 +158,16 @@ func TestParseFreeQuotaExhaustion(t *testing.T) {
 	}
 }
 
+func TestParseRateLimitRetryAfter(t *testing.T) {
+	body := []byte(`{"code":"resource-exhausted","error":"Requests per Minute (actual/limit): 139/60"}`)
+	if got := parseRateLimitRetryAfter(body); got != 65*time.Second {
+		t.Fatalf("RPM cooldown = %s", got)
+	}
+	if got := parseRateLimitRetryAfter([]byte(`{"error":"resets in: 1m 15s"}`)); got != 75*time.Second {
+		t.Fatalf("reset cooldown = %s", got)
+	}
+}
+
 func TestGatewayPreservesRepeatedSystemicForbiddenWithoutCoolingAccounts(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "systemic-forbidden.db"))

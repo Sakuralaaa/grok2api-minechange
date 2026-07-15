@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -430,6 +431,24 @@ func (s *Selector) MarkModelQuotaExhausted(ctx context.Context, credential accou
 	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
 		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_quota_depleted", CooldownUntil: until, UpdatedAt: time.Now().UTC(),
 	})
+	s.invalidateCandidates(credential.Provider)
+}
+
+func (s *Selector) MarkModelRateLimited(ctx context.Context, credential account.Credential, upstreamModel string, retryAfter time.Duration) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" {
+		s.MarkFailure(ctx, credential, http.StatusTooManyRequests, retryAfter)
+		return
+	}
+	if retryAfter <= 0 {
+		retryAfter = 65 * time.Second
+	}
+	retryAfter += time.Duration(credential.ID%11) * time.Second
+	now := time.Now().UTC()
+	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
+		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_rate_limited", CooldownUntil: now.Add(retryAfter), UpdatedAt: now,
+	})
+	_ = s.sticky.DeleteByAccount(ctx, credential.ID)
 	s.invalidateCandidates(credential.Provider)
 }
 
