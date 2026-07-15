@@ -18,6 +18,7 @@ type responseEnvelope struct {
 	Model     string         `json:"model"`
 	Status    string         `json:"status"`
 	CreatedAt int64          `json:"created_at"`
+	OutputText string        `json:"output_text"`
 	Output    []responseItem `json:"output"`
 	Usage     responseUsage  `json:"usage"`
 	Error     any            `json:"error"`
@@ -106,6 +107,7 @@ func parseResponse(value responseEnvelope) parsedResponse {
 	if parsed.CreatedAt == 0 {
 		parsed.CreatedAt = time.Now().Unix()
 	}
+	parsed.Text = value.OutputText
 	for _, item := range value.Output {
 		switch item.Type {
 		case "message":

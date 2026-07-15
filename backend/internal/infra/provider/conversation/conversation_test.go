@@ -281,6 +281,19 @@ func TestConvertResponsesJSONToChatAndMessages(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesJSONUsesTopLevelOutputText(t *testing.T) {
+	body := []byte(`{
+		"id":"resp_text","model":"grok-4.5","status":"completed","output_text":"hello"
+	}`)
+	converted, err := ConvertResponseJSON(body, OperationChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(converted), `"content":"hello"`) {
+		t.Fatalf("chat response should contain top-level output_text: %s", converted)
+	}
+}
+
 func TestConvertResponsesJSONToMessagesThinkingAndStop(t *testing.T) {
 	body := []byte(`{
 		"id":"response-1","model":"grok-4.5","status":"completed",
@@ -373,6 +386,44 @@ func TestConvertResponsesStream(t *testing.T) {
 		if operation == OperationMessages && (!strings.Contains(value, "event: message_start") || !strings.Contains(value, "event: content_block_delta") || !strings.Contains(value, "event: message_stop")) {
 			t.Fatalf("messages stream = %s", value)
 		}
+	}
+}
+
+func TestConvertResponsesStreamEmitsCompletedMessageText(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: response.created`,
+		`data: {"type":"response.created","response":{"id":"resp_2","model":"grok-4.5","status":"in_progress"}}`, "",
+		`event: response.output_item.done`,
+		`data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"hello"}]}}`, "",
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"id":"resp_2","model":"grok-4.5","status":"completed"}}`, "", "",
+	}, "\n")
+	converted, err := io.ReadAll(ConvertResponseStream(io.NopCloser(strings.NewReader(stream)), OperationChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(converted)
+	if !strings.Contains(text, `"content":"hello"`) || !strings.Contains(text, "data: [DONE]") {
+		t.Fatalf("chat stream should emit completed message text: %s", text)
+	}
+}
+
+func TestConvertResponsesStreamEmitsDoneTextEvents(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: response.output_text.done`,
+		`data: {"type":"response.output_text.done","text":"done text"}`, "",
+		`event: response.content_part.done`,
+		`data: {"type":"response.content_part.done","part":{"type":"output_text","text":"done text"}}`, "",
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"status":"completed"}}`, "", "",
+	}, "\n")
+	converted, err := io.ReadAll(ConvertResponseStream(io.NopCloser(strings.NewReader(stream)), OperationChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(converted)
+	if strings.Count(text, `"content":"done text"`) != 1 {
+		t.Fatalf("done events should emit one text delta: %s", text)
 	}
 }
 

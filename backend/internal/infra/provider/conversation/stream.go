@@ -43,6 +43,7 @@ type streamConverter struct {
 	started         bool
 	finished        bool
 	textStarted     bool
+	textEmitted     string
 	textIndex       int
 	thinkingStarted bool
 	thinkingClosed  bool
@@ -100,6 +101,14 @@ func (c *streamConverter) handle(event string, data []byte) error {
 			return err
 		}
 		return c.textDelta(delta)
+	case "response.output_text.done":
+		var text string
+		_ = json.Unmarshal(root["text"], &text)
+		return c.fullTextDelta(text)
+	case "response.content_part.done":
+		var part responseContent
+		_ = json.Unmarshal(root["part"], &part)
+		return c.fullTextDelta(part.Text)
 	case "response.reasoning_summary_text.delta":
 		var delta string
 		_ = json.Unmarshal(root["delta"], &delta)
@@ -145,10 +154,16 @@ func (c *streamConverter) handle(event string, data []byte) error {
 		if item.Type == "reasoning" {
 			return c.thinkingDone(item)
 		}
+		if item.Type == "message" {
+			return c.fullTextDelta(responseItemText(item))
+		}
 	case "response.completed", "response.incomplete":
 		var response responseEnvelope
 		_ = json.Unmarshal(root["response"], &response)
 		c.setResponse(response)
+		if err := c.fullTextDelta(responseText(response)); err != nil {
+			return err
+		}
 		status := response.Status
 		if status == "" && typeName == "response.incomplete" {
 			status = "incomplete"
@@ -200,6 +215,10 @@ func (c *streamConverter) start() error {
 }
 
 func (c *streamConverter) textDelta(delta string) error {
+	if delta == "" {
+		return nil
+	}
+	c.textEmitted += delta
 	if c.operation == OperationChat {
 		return c.chatDelta(map[string]any{"content": delta})
 	}
@@ -219,6 +238,42 @@ func (c *streamConverter) textDelta(delta string) error {
 		return nil
 	}
 	return c.writeEvent("content_block_delta", map[string]any{"type": "content_block_delta", "index": c.textIndex, "delta": map[string]any{"type": "text_delta", "text": emit}})
+}
+
+func (c *streamConverter) fullTextDelta(full string) error {
+	if full == "" {
+		return nil
+	}
+	if c.textEmitted != "" {
+		if full == c.textEmitted {
+			return nil
+		}
+		if strings.HasPrefix(full, c.textEmitted) {
+			full = full[len(c.textEmitted):]
+		}
+	}
+	return c.textDelta(full)
+}
+
+func responseText(value responseEnvelope) string {
+	text := value.OutputText
+	for _, item := range value.Output {
+		text += responseItemText(item)
+	}
+	return text
+}
+
+func responseItemText(item responseItem) string {
+	if item.Type != "message" {
+		return ""
+	}
+	var text strings.Builder
+	for _, content := range item.Content {
+		if content.Type == "output_text" || content.Type == "text" {
+			text.WriteString(content.Text)
+		}
+	}
+	return text.String()
 }
 
 func (c *streamConverter) thinkingStart(itemID string) error {

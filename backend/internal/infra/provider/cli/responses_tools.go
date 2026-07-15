@@ -120,12 +120,9 @@ func normalizeResponsesTools(payload map[string]json.RawMessage) (*responsesTool
 	if hasTools || len(normalizedTools) > 0 {
 		payload["tools"] = mustJSON(normalizedTools)
 	}
-	if err := compatibility.normalizeToolChoice(payload, normalizedTools); err != nil {
-		return nil, err
-	}
 	if len(normalizedTools) == 0 {
-		// Codex /responses/compact often sends tool_choice without tools.
-		// Grok Build rejects that combination with invalid-argument.
+		// Compact requests may carry a stale tool_choice after Codex has
+		// unloaded all tools. Remove it before validating tool_choice kinds.
 		if hasTools {
 			delete(payload, "tools")
 			compatibility.changed = true
@@ -135,6 +132,13 @@ func normalizeResponsesTools(payload map[string]json.RawMessage) (*responsesTool
 			compatibility.changed = true
 			compatibility.addWarning("tool_choice_stripped_without_tools")
 		}
+		if !compatibility.changed {
+			return nil, nil
+		}
+		return compatibility, nil
+	}
+	if err := compatibility.normalizeToolChoice(payload, normalizedTools); err != nil {
+		return nil, err
 	}
 	if !compatibility.changed {
 		return nil, nil
