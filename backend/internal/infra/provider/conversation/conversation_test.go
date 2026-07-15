@@ -456,6 +456,46 @@ func TestConvertResponsesStreamIgnoresFailedEventForChat(t *testing.T) {
 	}
 }
 
+func TestConvertChatRequestControlsThinkingAliases(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "default", body: `{"model":"public","messages":[{"role":"user","content":"hi"}]}`, want: true},
+		{name: "disabled", body: `{"model":"public","reasoning_effort":"none","messages":[{"role":"user","content":"hi"}]}`, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, options, err := ConvertRequestWithOptions([]byte(test.body), "grok-4.3", OperationChat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if options.ChatThinking != test.want {
+				t.Fatalf("ChatThinking = %v, want %v", options.ChatThinking, test.want)
+			}
+		})
+	}
+}
+
+func TestConvertResponsesStreamEmitsChatThinkingAliases(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: response.reasoning_summary_text.delta`,
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}`, "",
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"status":"completed"}}`, "", "",
+	}, "\n")
+	converted, err := io.ReadAll(ConvertResponseStreamWithOptions(io.NopCloser(strings.NewReader(stream)), OperationChat, ResponseOptions{ChatThinking: true, ChatThinkingConfigured: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(converted)
+	for _, field := range []string{`"reasoning_content":"thinking"`, `"reasoning":"thinking"`, `"thinking":"thinking"`} {
+		if !strings.Contains(text, field) {
+			t.Fatalf("missing Chat thinking alias %s: %s", field, text)
+		}
+	}
+}
+
 func TestConvertResponsesStreamToMessagesThinkingToolsAndStop(t *testing.T) {
 	stream := strings.Join([]string{
 		`event: response.created`,

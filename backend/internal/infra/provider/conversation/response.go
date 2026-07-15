@@ -9,8 +9,10 @@ import (
 
 // ResponseOptions 保留无法直接交给 Responses 上游执行的下游协议语义。
 type ResponseOptions struct {
-	AnthropicThinking bool
-	StopSequences     []string
+	AnthropicThinking      bool
+	ChatThinking           bool
+	ChatThinkingConfigured bool
+	StopSequences          []string
 }
 
 type responseEnvelope struct {
@@ -91,6 +93,9 @@ func ConvertResponseJSONWithOptions(body []byte, operation string, options Respo
 		return body, nil
 	}
 	parsed := parseResponse(envelope)
+	if operation == OperationChat && options.ChatThinkingConfigured && !options.ChatThinking {
+		parsed.Reasoning = ""
+	}
 	if operation == OperationMessages {
 		parsed.Text, parsed.StopSequence = applyAnthropicStopSequences(parsed.Text, options.StopSequences)
 	}

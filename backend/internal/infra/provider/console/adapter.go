@@ -194,7 +194,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 		if request.Streaming {
 			// Rewrite PublicID + inject synthetic reasoning before protocol conversion.
-			resp.Body = TransformStreamWithOptions(resp.Body, publicID, request.Operation != conversation.OperationChat)
+			resp.Body = TransformStreamWithOptions(resp.Body, publicID, request.Operation != conversation.OperationChat || conversationOptions.ChatThinking)
 			if request.Operation == conversation.OperationChat || request.Operation == conversation.OperationMessages {
 				resp.Body = conversation.ConvertResponseStreamWithOptions(resp.Body, request.Operation, conversationOptions)
 			}
@@ -211,7 +211,8 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 			if len(data) > maxResponseBytes {
 				return nil, fmt.Errorf("console response exceeds 64 MiB")
 			}
-			normalized, normErr := NormalizeResponseJSON(data, publicID)
+			emitThinking := request.Operation != conversation.OperationChat || conversationOptions.ChatThinking
+			normalized, normErr := NormalizeResponseJSONWithOptions(data, publicID, emitThinking)
 			if normErr != nil {
 				return nil, normErr
 			}

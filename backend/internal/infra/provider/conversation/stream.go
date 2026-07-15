@@ -116,7 +116,15 @@ func (c *streamConverter) handle(event string, data []byte) error {
 		var delta string
 		_ = json.Unmarshal(root["delta"], &delta)
 		if c.operation == OperationChat {
-			return c.chatDelta(map[string]any{"reasoning_content": delta})
+			if c.options.ChatThinkingConfigured && !c.options.ChatThinking {
+				return nil
+			}
+			thinking := map[string]any{"reasoning_content": delta}
+			if c.options.ChatThinking {
+				thinking["reasoning"] = delta
+				thinking["thinking"] = delta
+			}
+			return c.chatDelta(thinking)
 		}
 		return c.thinkingDelta(delta)
 	case "response.reasoning_text.delta":

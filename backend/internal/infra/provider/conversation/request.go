@@ -25,7 +25,21 @@ func ConvertRequestWithOptions(body []byte, model, operation string) ([]byte, Re
 	switch operation {
 	case OperationChat:
 		converted, err := convertChatRequest(body, model)
-		return converted, ResponseOptions{}, err
+		if err != nil {
+			return converted, ResponseOptions{}, err
+		}
+		var source map[string]json.RawMessage
+		if json.Unmarshal(body, &source) != nil {
+			return converted, ResponseOptions{}, nil
+		}
+		chatThinking := true
+		if raw := source["reasoning_effort"]; !isEmptyJSON(raw) {
+			var effort string
+			if json.Unmarshal(raw, &effort) == nil && strings.EqualFold(strings.TrimSpace(effort), "none") {
+				chatThinking = false
+			}
+		}
+		return converted, ResponseOptions{ChatThinking: chatThinking, ChatThinkingConfigured: true}, nil
 	case OperationMessages:
 		return convertMessagesRequest(body, model)
 	default:

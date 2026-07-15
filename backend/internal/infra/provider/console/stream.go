@@ -142,6 +142,10 @@ func copyWithHeartbeat(dst io.Writer, source io.Reader, interval time.Duration) 
 
 // NormalizeResponseJSON rewrites model to publicID and injects synthetic reasoning when missing.
 func NormalizeResponseJSON(data []byte, publicID string) ([]byte, error) {
+	return NormalizeResponseJSONWithOptions(data, publicID, true)
+}
+
+func NormalizeResponseJSONWithOptions(data []byte, publicID string, emitThink bool) ([]byte, error) {
 	publicID = strings.TrimSpace(publicID)
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
@@ -151,7 +155,7 @@ func NormalizeResponseJSON(data []byte, publicID string) ([]byte, error) {
 	if err := json.Unmarshal(trimmed, &obj); err != nil {
 		return data, nil
 	}
-	normalizeResponseObject(obj, publicID, true)
+	normalizeResponseObject(obj, publicID, emitThink)
 	return json.Marshal(obj)
 }
 
