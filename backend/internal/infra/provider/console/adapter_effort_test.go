@@ -1,7 +1,10 @@
 package console
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +84,17 @@ func TestEnrichConsoleBodyAddsAutomaticToolChoice(t *testing.T) {
 	}
 	if tools, ok := payload["tools"].([]any); !ok || len(tools) != 2 {
 		t.Fatalf("default tools = %#v", payload["tools"])
+	}
+}
+
+func TestCancelBodyCancelsWhenClosed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	body := &cancelBody{ReadCloser: io.NopCloser(strings.NewReader("stream")), cancel: cancel}
+	if err := body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("context error = %v, want canceled", ctx.Err())
 	}
 }
 

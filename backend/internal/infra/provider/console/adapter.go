@@ -171,19 +171,27 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var cancel context.CancelFunc
 	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > time.Duration(cfg.TimeoutSeconds)*time.Second {
 		reqCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
-		defer cancel()
 	}
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, cfg.ResponsesURL, bytes.NewReader(body))
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 	a.applyHeaders(req, token, lease, request.Streaming)
 
 	resp, err := lease.Do(req)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
 		return nil, err
+	}
+	if cancel != nil {
+		resp.Body = &cancelBody{ReadCloser: resp.Body, cancel: cancel}
 	}
 	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, resp.StatusCode, nil)
 
@@ -234,6 +242,20 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	}
 
 	return &provider.Response{StatusCode: resp.StatusCode, Status: resp.Status, Header: resp.Header.Clone(), Body: resp.Body}, nil
+}
+
+type cancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelBody) Close() error {
+	err := b.ReadCloser.Close()
+	if b.cancel != nil {
+		b.cancel()
+		b.cancel = nil
+	}
+	return err
 }
 
 
