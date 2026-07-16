@@ -843,7 +843,7 @@ export function AccountsPage() {
       </Dialog>
 
       <Dialog open={inspectionOpen} onOpenChange={setInspectionOpen}>
-        <DialogContent className="max-h-[88vh] max-w-6xl overflow-hidden">
+        <DialogContent className="flex max-h-[88vh] max-w-6xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ShieldCheck className="size-5" />Grok Build 账号池巡检</DialogTitle>
             <DialogDescription>使用轻量对话请求检测账号健康、权限、免费额度和登录状态。巡检本身不会自动修改账号。</DialogDescription>
@@ -858,7 +858,7 @@ export function AccountsPage() {
           </div>
           <InspectionSummary snapshot={inspectionQuery.data} loading={inspectionQuery.isPending} />
           {inspectionQuery.data?.resolvedBaseURL ? <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"><Badge variant="outline">using_api: {inspectionQuery.data.usingAPI ? "true" : "false"}</Badge><span className="text-muted-foreground">实际巡检链路</span><code className="break-all">{inspectionQuery.data.resolvedBaseURL}</code>{inspectionQuery.data.baseURL && inspectionQuery.data.baseURL !== inspectionQuery.data.resolvedBaseURL ? <span className="text-muted-foreground">（配置地址：{inspectionQuery.data.baseURL}）</span> : null}</div> : null}
-          <div className="max-h-[52vh] overflow-auto rounded-lg border">
+          <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
             <Table className="min-w-[900px]">
               <TableHeader><TableRow><TableHead>账号</TableHead><TableHead>结果</TableHead><TableHead>建议</TableHead><TableHead>状态</TableHead><TableHead>原因</TableHead><TableHead className="text-right">耗时</TableHead></TableRow></TableHeader>
               <TableBody>
@@ -868,7 +868,7 @@ export function AccountsPage() {
               </TableBody>
             </Table>
           </div>
-          <DialogFooter className="items-center sm:justify-between">
+          <DialogFooter className="shrink-0 items-center sm:justify-between">
             <span className="text-xs text-muted-foreground">403 凭证失效建议删除；402/额度用尽建议进入 24 小时冷却池，到期自动恢复。临时 429、模型不可用和探测异常会保留。</span>
             <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => setInspectionOpen(false)}>关闭</Button><Button size="sm" disabled={inspectionQuery.data?.running || !inspectionQuery.data?.results.some((item) => item.action !== "keep") || applyInspectionMutation.isPending} onClick={() => applyInspectionMutation.mutate()}>{applyInspectionMutation.isPending ? <Spinner /> : null}执行全部建议</Button></div>
           </DialogFooter>
