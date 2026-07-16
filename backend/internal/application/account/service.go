@@ -19,17 +19,18 @@ import (
 )
 
 var (
-	ErrDevicePending  = errors.New("Device OAuth 等待用户授权")
-	ErrDeviceSlowDown = errors.New("Device OAuth 轮询过快")
-	ErrDeviceDenied   = errors.New("Device OAuth 已拒绝或过期")
-	ErrInvalidFilter  = errors.New("账号筛选条件无效")
-	ErrInvalidInput   = errors.New("账号参数无效")
-	ErrInvalidImport  = errors.New("账号凭据格式无效")
-	ErrImportLimit    = errors.New("导入账号数量超过限制")
-	ErrExportLimit    = errors.New("导出账号数量超过限制")
-	ErrNotFound       = errors.New("账号不存在")
-	ErrUnsupported    = errors.New("账号来源不支持该操作")
-	ErrConversionBusy = errors.New("账号正在转换为 Grok Build")
+	ErrDevicePending              = errors.New("Device OAuth 等待用户授权")
+	ErrDeviceSlowDown             = errors.New("Device OAuth 轮询过快")
+	ErrDeviceDenied               = errors.New("Device OAuth 已拒绝或过期")
+	ErrInvalidFilter              = errors.New("账号筛选条件无效")
+	ErrInvalidInput               = errors.New("账号参数无效")
+	ErrInvalidImport              = errors.New("账号凭据格式无效")
+	ErrImportLimit                = errors.New("导入账号数量超过限制")
+	ErrExportLimit                = errors.New("导出账号数量超过限制")
+	ErrNotFound                   = errors.New("账号不存在")
+	ErrUnsupported                = errors.New("账号来源不支持该操作")
+	ErrConversionBusy             = errors.New("账号正在转换为 Grok Build")
+	ErrCredentialRefreshPermanent = errors.New("OAuth refresh token 已永久失效")
 )
 
 const (
@@ -46,13 +47,13 @@ const (
 	webQuotaRefreshQueueSize                  = 4096
 	webQuotaRefreshTimeout                    = 30 * time.Second
 	maxCredentialExportAccounts               = 10000
-	ConsoleQuotaMode = "console"
+	ConsoleQuotaMode                          = "console"
 
-	maxCredentialImportAccounts               = 10000
-	credentialImportChunkSize                 = 100
-	maxBuildConversionAccounts                = 1000
+	maxCredentialImportAccounts   = 10000
+	credentialImportChunkSize     = 100
+	maxBuildConversionAccounts    = 1000
+	permanentRefreshExpiredReason = "OAuth refresh token 已永久失效且 access token 已过期"
 )
-
 
 var (
 	consoleQuotaLimit         = 150
@@ -68,7 +69,6 @@ func SetConsoleQuotaDefaults(limit, windowSeconds int) {
 		consoleQuotaWindowSeconds = windowSeconds
 	}
 }
-
 
 type webQuotaRefreshState struct {
 	pending bool
@@ -251,6 +251,10 @@ type Service struct {
 	credentialRefreshWake chan struct{}
 	logger                *slog.Logger
 	now                   func() time.Time
+	inspectionMu          sync.Mutex
+	inspectionRunID       uint64
+	inspectionCancel      context.CancelFunc
+	inspection            BuildInspectionSnapshot
 }
 
 func (s *Service) SetQuotaRecoveryQueue(queue repository.QuotaRecoveryQueue) {
@@ -1018,9 +1022,9 @@ func (s *Service) MarkReauthRequired(ctx context.Context, id uint64, reason stri
 	}
 	// Build 账号若仍有 refresh token，标记失效后继续进入后台自动恢复队列，而不是永久躺尸。
 	// 真正 invalid_grant / 无 refresh token 的号无法自动恢复，保持 reauth 等待人工处理。
-	if value.Provider == accountdomain.ProviderBuild && value.EncryptedRefreshToken != "" {
+	if value.Provider == accountdomain.ProviderBuild && value.EncryptedRefreshToken != "" && !value.RefreshPermanent {
 		now := s.now()
-		if err := s.accounts.UpdateCredentialRefreshFailure(ctx, id, value.RefreshFailureCount, now, "reauth_recovery_pending"); err != nil {
+		if err := s.accounts.UpdateCredentialRefreshFailure(ctx, id, value.RefreshFailureCount, now, "reauth_recovery_pending", false); err != nil {
 			s.logger.Warn("credential_reauth_schedule_failed", "account_id", id, "error", err)
 		}
 		s.clearRefreshState(id)
@@ -1028,7 +1032,6 @@ func (s *Service) MarkReauthRequired(ctx context.Context, id uint64, reason stri
 	}
 	return nil
 }
-
 
 // EnsureCredential 在即将过期时刷新 token，同一账号并发请求只执行一次刷新。
 func (s *Service) EnsureCredential(ctx context.Context, value accountdomain.Credential, force bool) (accountdomain.Credential, error) {
@@ -1043,6 +1046,9 @@ func (s *Service) ensureCredential(ctx context.Context, value accountdomain.Cred
 		return value, nil
 	}
 	now := s.now()
+	if credential, err, handled := s.resolvePermanentRefreshFailure(ctx, value, now, force); handled {
+		return credential, err
+	}
 	if !force && value.ExpiresAt.IsZero() && value.EncryptedAccessToken != "" {
 		return value, nil
 	}
@@ -1059,6 +1065,12 @@ func (s *Service) ensureCredential(ctx context.Context, value accountdomain.Cred
 			return nil, err
 		}
 		currentTime := s.now()
+		if credential, err, handled := s.resolvePermanentRefreshFailure(ctx, latest, currentTime, force); handled {
+			if err != nil {
+				return nil, err
+			}
+			return credential, nil
+		}
 		if respectSchedule && latest.RefreshDueAt != nil && latest.RefreshDueAt.After(currentTime) {
 			return latest, nil
 		}
@@ -1082,6 +1094,12 @@ func (s *Service) ensureCredential(ctx context.Context, value accountdomain.Cred
 				return nil, err
 			}
 			currentTime = s.now()
+			if credential, err, handled := s.resolvePermanentRefreshFailure(ctx, latest, currentTime, force); handled {
+				if err != nil {
+					return nil, err
+				}
+				return credential, nil
+			}
 			if respectSchedule && latest.RefreshDueAt != nil && latest.RefreshDueAt.After(currentTime) {
 				return latest, nil
 			}
@@ -1209,32 +1227,52 @@ func (s *Service) recordCredentialRefreshFailure(ctx context.Context, credential
 	} else if errors.Is(refreshErr, context.DeadlineExceeded) {
 		errorCode = "oauth_timeout"
 	}
+	// 永久失败只能由成功换取新 token 清除，后续偶发传输错误不能把状态降级为可重试。
+	permanent = permanent || credential.RefreshPermanent
 	now := s.now()
 	retryAt := now.Add(credentialRefreshBackoff(credential.ID, failureCount, retryAfter))
-	if permanent {
+	accessTokenAlive := credential.EncryptedAccessToken != "" && !credential.ExpiresAt.IsZero() && credential.ExpiresAt.After(now)
+	if permanent && accessTokenAlive {
+		retryAt = credential.ExpiresAt
+	} else if permanent {
 		retryAt = now
 	}
-	if err := s.accounts.UpdateCredentialRefreshFailure(ctx, credential.ID, failureCount, retryAt, errorCode); err != nil {
+	if err := s.accounts.UpdateCredentialRefreshFailure(ctx, credential.ID, failureCount, retryAt, errorCode, permanent); err != nil {
 		s.logger.Warn("credential_refresh_state_write_failed", "account_id", credential.ID, "error", err)
 	}
+	if permanent && accessTokenAlive {
+		s.logger.Warn("credential_refresh_permanent_but_token_alive", "account_id", credential.ID, "error_code", errorCode, "expires_at", credential.ExpiresAt, "retry_at", retryAt)
+		s.WakeCredentialRefresh()
+		return
+	}
 	if permanent {
-		// Permanent OAuth failures (for example invalid_grant) need manual reauth.
-		// Keep the upstream error code instead of overwriting it with recovery scheduling metadata.
-		latest, err := s.accounts.Get(ctx, credential.ID)
-		if err != nil {
-			s.logger.Warn("credential_refresh_reauth_load_failed", "account_id", credential.ID, "error", err)
-			return
-		}
-		latest.AuthStatus = accountdomain.AuthStatusReauthRequired
-		latest.LastError = "OAuth refresh failed: " + errorCode
-		if _, err := s.accounts.Update(ctx, latest); err != nil {
+		if err := s.MarkReauthRequired(ctx, credential.ID, "OAuth refresh failed: "+errorCode); err != nil {
 			s.logger.Warn("credential_refresh_reauth_mark_failed", "account_id", credential.ID, "error", err)
 		}
-		s.clearRefreshState(credential.ID)
 		return
 	}
 	s.logger.Warn("credential_refresh_deferred", "account_id", credential.ID, "failure_count", failureCount, "retry_at", retryAt, "error_code", errorCode)
 	s.WakeCredentialRefresh()
+}
+
+// resolvePermanentRefreshFailure 阻止再次请求已确认失效的 refresh token，并在 access token 到期后收敛账号状态。
+func (s *Service) resolvePermanentRefreshFailure(ctx context.Context, credential accountdomain.Credential, now time.Time, force bool) (accountdomain.Credential, error, bool) {
+	if !credential.RefreshPermanent {
+		return accountdomain.Credential{}, nil, false
+	}
+	accessTokenAlive := credential.EncryptedAccessToken != "" && !credential.ExpiresAt.IsZero() && credential.ExpiresAt.After(now)
+	if accessTokenAlive && !force {
+		return credential, nil, true
+	}
+	if !accessTokenAlive {
+		if err := s.MarkReauthRequired(ctx, credential.ID, permanentRefreshExpiredReason); err != nil {
+			return accountdomain.Credential{}, err, true
+		}
+	}
+	if credential.LastRefreshErrorCode == "" {
+		return accountdomain.Credential{}, ErrCredentialRefreshPermanent, true
+	}
+	return accountdomain.Credential{}, fmt.Errorf("%w: %s", ErrCredentialRefreshPermanent, credential.LastRefreshErrorCode), true
 }
 
 func credentialRefreshBackoff(accountID uint64, failureCount int, retryAfter time.Duration) time.Duration {

@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CircleCheck, ClipboardPaste, Clock3, Copy, Download, ExternalLink, FileUp, Link2, MoreHorizontal, Pencil, RefreshCw, RotateCw, Search, Trash2, TriangleAlert, Users } from "lucide-react";
+import { ArrowRight, CircleCheck, ClipboardPaste, Clock3, Copy, Download, ExternalLink, FileUp, Link2, MoreHorizontal, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Trash2, TriangleAlert, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -35,8 +35,10 @@ import { nextTableSort, type SortOrder, type TableSort } from "@/shared/lib/tabl
 import {
   deleteAccount,
   deleteAccounts,
+  applyBuildInspectionRecommendations,
   convertWebAccountsToBuild,
   exportAccounts,
+  getBuildInspectionStatus,
   getAccountSummary,
   importAccounts,
   importWebAccounts,
@@ -51,12 +53,17 @@ import {
   refreshAccountsTokens,
   refreshAllWebAccountQuotas,
   startDeviceAuthorization,
+  startBuildInspection,
+  stopBuildInspection,
   updateAccount,
   updateAccountsEnabled,
   type AccountDTO,
   type AccountUpdateInput,
   type AccountTaskProgressDTO,
   type BuildConversionInput,
+  type BuildInspectionClassification,
+  type BuildInspectionResultDTO,
+  type BuildInspectionSnapshotDTO,
   type DeviceSessionDTO,
   type QuotaDTO,
 } from "@/features/accounts/accounts-api";
@@ -104,6 +111,10 @@ export function AccountsPage() {
   const [deviceStatus, setDeviceStatus] = useState<"starting" | "pending" | "failed">("starting");
   const [quickImportOpen, setQuickImportOpen] = useState(false);
   const [quickImportTokens, setQuickImportTokens] = useState("");
+  const [inspectionOpen, setInspectionOpen] = useState(false);
+  const [inspectionWorkers, setInspectionWorkers] = useState(6);
+  const [inspectionIncludeDisabled, setInspectionIncludeDisabled] = useState(true);
+  const [inspectionOnlyDisabled, setInspectionOnlyDisabled] = useState(false);
   const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => () => {
@@ -138,10 +149,43 @@ export function AccountsPage() {
     queryFn: getAccountSummary,
   });
 
+  const inspectionQuery = useQuery({
+    queryKey: ["accounts", "inspection"],
+    queryFn: getBuildInspectionStatus,
+    enabled: provider === "grok_build",
+    refetchInterval: (query) => query.state.data?.running ? 1000 : false,
+  });
+
   const invalidateAccountData = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["accounts"] });
     void queryClient.invalidateQueries({ queryKey: ["accounts", "summary"] });
   }, [queryClient]);
+
+  const startInspectionMutation = useMutation({
+    mutationFn: () => startBuildInspection({ workers: inspectionWorkers, includeDisabled: inspectionIncludeDisabled, onlyDisabled: inspectionOnlyDisabled }),
+    onSuccess: (value) => {
+      queryClient.setQueryData(["accounts", "inspection"], value);
+      setInspectionOpen(true);
+      toast.success("Grok Build 账号巡检已启动");
+    },
+    onError: showError,
+  });
+
+  const stopInspectionMutation = useMutation({
+    mutationFn: stopBuildInspection,
+    onSuccess: (value) => queryClient.setQueryData(["accounts", "inspection"], value),
+    onError: showError,
+  });
+
+  const applyInspectionMutation = useMutation({
+    mutationFn: () => applyBuildInspectionRecommendations(),
+    onSuccess: (value) => {
+      invalidateAccountData();
+      void inspectionQuery.refetch();
+      toast.success(`建议处理完成：启用 ${value.enabled}，禁用 ${value.disabled}，删除 ${value.deleted}，失败 ${value.failed}`);
+    },
+    onError: showError,
+  });
 
   const updateMutation = useMutation({
     mutationFn: (values: AccountForm) => {
@@ -589,6 +633,7 @@ export function AccountsPage() {
             ) : (
               <div className="flex items-center gap-1.5">
                 {provider === "grok_web" && webSummary.total > 0 ? <Button variant="secondary" size="sm" onClick={() => setConversionTargets("all")}>{t("accountBulk.convertAllToBuild")}</Button> : null}
+                {provider === "grok_build" && buildSummary.total > 0 ? <Button variant="secondary" size="sm" onClick={() => setInspectionOpen(true)}><ShieldCheck />账号巡检</Button> : null}
                 {hasAccounts ? <Button variant="secondary" size="sm" onClick={() => setSyncAllOpen(true)}>{t("accounts.syncAll")}</Button> : null}
                 {hasAccounts && provider === "grok_build" ? <Button variant="secondary" size="sm" onClick={() => setRenewAllOpen(true)}><RotateCw />{t("accounts.renewAll")}</Button> : null}
                 <DropdownMenu>
@@ -797,6 +842,38 @@ export function AccountsPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={inspectionOpen} onOpenChange={setInspectionOpen}>
+        <DialogContent className="max-h-[88vh] max-w-6xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ShieldCheck className="size-5" />Grok Build 账号池巡检</DialogTitle>
+            <DialogDescription>使用轻量对话请求检测账号健康、权限、免费额度和登录状态。巡检本身不会自动修改账号。</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
+            <div className="space-y-1"><Label htmlFor="inspection-workers">并发数</Label><Input id="inspection-workers" className="w-24" type="number" min={1} max={16} value={inspectionWorkers} disabled={inspectionQuery.data?.running} onChange={(event) => setInspectionWorkers(Math.max(1, Math.min(16, Number(event.target.value) || 1)))} /></div>
+            <label className="flex h-8 items-center gap-2 text-sm"><Switch checked={inspectionIncludeDisabled} disabled={inspectionQuery.data?.running || inspectionOnlyDisabled} onCheckedChange={setInspectionIncludeDisabled} />包含已禁用账号</label>
+            <label className="flex h-8 items-center gap-2 text-sm"><Switch checked={inspectionOnlyDisabled} disabled={inspectionQuery.data?.running} onCheckedChange={(checked) => { setInspectionOnlyDisabled(checked); if (checked) setInspectionIncludeDisabled(true); }} />仅巡检已禁用账号</label>
+            <div className="ml-auto flex gap-2">
+              {inspectionQuery.data?.running ? <Button variant="secondary" size="sm" disabled={stopInspectionMutation.isPending} onClick={() => stopInspectionMutation.mutate()}>{stopInspectionMutation.isPending ? <Spinner /> : null}停止</Button> : <Button size="sm" disabled={startInspectionMutation.isPending} onClick={() => startInspectionMutation.mutate()}>{startInspectionMutation.isPending ? <Spinner /> : <RefreshCw />}开始巡检</Button>}
+            </div>
+          </div>
+          <InspectionSummary snapshot={inspectionQuery.data} loading={inspectionQuery.isPending} />
+          <div className="max-h-[52vh] overflow-auto rounded-lg border">
+            <Table className="min-w-[900px]">
+              <TableHeader><TableRow><TableHead>账号</TableHead><TableHead>结果</TableHead><TableHead>建议</TableHead><TableHead>状态</TableHead><TableHead>原因</TableHead><TableHead className="text-right">耗时</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {inspectionQuery.isPending ? <TableLoadingRow colSpan={6} /> : null}
+                {!inspectionQuery.isPending && (inspectionQuery.data?.results.length ?? 0) === 0 ? <TableRow><TableCell colSpan={6} className="h-28 text-center text-sm text-muted-foreground">尚无巡检结果</TableCell></TableRow> : null}
+                {inspectionQuery.data?.results.map((item) => <InspectionResultRow key={item.accountId} item={item} />)}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter className="items-center sm:justify-between">
+            <span className="text-xs text-muted-foreground">建议操作只处理启用、禁用和删除；临时限流、模型不可用和探测异常会保留。</span>
+            <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => setInspectionOpen(false)}>关闭</Button><Button size="sm" disabled={inspectionQuery.data?.running || !inspectionQuery.data?.results.some((item) => item.action !== "keep") || applyInspectionMutation.isPending} onClick={() => applyInspectionMutation.mutate()}>{applyInspectionMutation.isPending ? <Spinner /> : null}执行全部建议</Button></div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
@@ -852,6 +929,57 @@ function AccountMetricPanel({ icon, label, value, detail, loading }: { icon: Rea
       <div className="mt-3 flex min-h-7 items-center text-xl font-medium tabular-nums">{loading ? <Spinner /> : value}</div>
       <p className={cn("mt-1 text-xs text-muted-foreground", loading && "invisible")}>{detail}</p>
     </div>
+  );
+}
+
+const inspectionClassificationLabels: Record<BuildInspectionClassification, string> = {
+  healthy: "健康",
+  permission_denied: "权限被拒",
+  quota_exhausted: "额度用尽",
+  reauth: "需重新登录",
+  model_unavailable: "模型不可用",
+  probe_error: "探测异常",
+  unknown: "未知",
+  cancelled: "已停止",
+};
+
+function InspectionSummary({ snapshot, loading }: { snapshot?: BuildInspectionSnapshotDTO; loading: boolean }) {
+  if (loading) return <div className="flex h-12 items-center justify-center"><Spinner /></div>;
+  const progress = snapshot?.total ? Math.round((snapshot.done / snapshot.total) * 100) : 0;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-medium">进度 {snapshot?.done ?? 0} / {snapshot?.total ?? 0}</span>
+        {snapshot?.running ? <Badge variant="secondary" className="bg-sky-500/10 text-sky-700 dark:text-sky-300">运行中</Badge> : null}
+        {snapshot?.stopped && !snapshot.running ? <Badge variant="outline">已停止</Badge> : null}
+        {(Object.keys(inspectionClassificationLabels) as BuildInspectionClassification[]).map((classification) => {
+          const count = snapshot?.summary[classification] ?? 0;
+          return count > 0 ? <Badge key={classification} variant="outline">{inspectionClassificationLabels[classification]} {count}</Badge> : null;
+        })}
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-[width]" style={{ width: `${progress}%` }} /></div>
+    </div>
+  );
+}
+
+function InspectionResultRow({ item }: { item: BuildInspectionResultDTO }) {
+  const actionLabel = item.action === "enable" ? "启用" : item.action === "disable" ? "禁用" : item.action === "delete" ? "删除" : "保留";
+  const classificationClass = item.classification === "healthy"
+    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : item.classification === "reauth" || item.classification === "permission_denied"
+      ? "bg-destructive/10 text-destructive"
+      : item.classification === "quota_exhausted"
+        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        : "";
+  return (
+    <TableRow>
+      <TableCell><div className="max-w-48 truncate text-sm font-medium" title={item.name}>{item.name}</div><div className="max-w-48 truncate text-xs text-muted-foreground" title={item.email}>{item.email || `#${item.accountId}`}</div></TableCell>
+      <TableCell><Badge variant="secondary" className={classificationClass}>{inspectionClassificationLabels[item.classification]}</Badge></TableCell>
+      <TableCell><Badge variant={item.action === "delete" ? "destructive" : "outline"}>{item.applied ? "已处理" : actionLabel}</Badge>{item.applyError ? <div className="mt-1 max-w-40 text-xs text-destructive">{item.applyError}</div> : null}</TableCell>
+      <TableCell className="text-xs tabular-nums">{item.httpStatus || "-"}{item.disabled ? <span className="ml-2 text-muted-foreground">已禁用</span> : null}</TableCell>
+      <TableCell><div className="max-w-80 text-xs">{item.reason}</div>{item.errorMessage ? <div className="mt-1 max-w-80 truncate text-xs text-muted-foreground" title={item.errorMessage}>{item.errorCode ? `${item.errorCode}: ` : ""}{item.errorMessage}</div> : null}</TableCell>
+      <TableCell className="text-right text-xs tabular-nums">{item.durationMs} ms</TableCell>
+    </TableRow>
   );
 }
 

@@ -194,6 +194,14 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		resp.Body = &cancelBody{ReadCloser: resp.Body, cancel: cancel}
 	}
 	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, resp.StatusCode, nil)
+	var rateLimit *provider.RateLimitMetadata
+	if resp.StatusCode == http.StatusTooManyRequests {
+		rateLimit, err = normalizeRateLimitResponse(resp)
+		if err != nil {
+			_ = resp.Body.Close()
+			return nil, err
+		}
+	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		heartbeat := time.Duration(0)
@@ -241,7 +249,35 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 	}
 
-	return &provider.Response{StatusCode: resp.StatusCode, Status: resp.Status, Header: resp.Header.Clone(), Body: resp.Body}, nil
+	return &provider.Response{StatusCode: resp.StatusCode, Status: resp.Status, Header: resp.Header.Clone(), Body: resp.Body, RateLimit: rateLimit}, nil
+}
+
+func normalizeRateLimitResponse(response *http.Response) (*provider.RateLimitMetadata, error) {
+	data, _, err := provider.ReadDiagnosticBody(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = response.Body.Close()
+	response.Body = io.NopCloser(bytes.NewReader(data))
+	response.ContentLength = int64(len(data))
+	response.Header.Set("Content-Length", strconv.Itoa(len(data)))
+	metadata := parseConsoleRateLimitMetadata(data)
+	if headerValue := response.Header.Get("Retry-After"); headerValue != "" {
+		if metadata != nil {
+			if retryAfter := parseConsoleRetryAfterHeader(headerValue, time.Now().UTC()); retryAfter > 0 {
+				metadata.RetryAfter = retryAfter
+			}
+		}
+	} else {
+		retryAfter := consoleRetryAfter(data)
+		if metadata != nil {
+			retryAfter = metadata.RetryAfter
+		}
+		if retryAfter > 0 {
+			response.Header.Set("Retry-After", strconv.FormatInt(int64(retryAfter/time.Second), 10))
+		}
+	}
+	return metadata, nil
 }
 
 type cancelBody struct {
@@ -257,7 +293,6 @@ func (b *cancelBody) Close() error {
 	}
 	return err
 }
-
 
 func (a *Adapter) enrichConsoleBody(body []byte, publicID, upstreamModel string, streaming bool) ([]byte, error) {
 	cfg := a.config()

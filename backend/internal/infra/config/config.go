@@ -54,11 +54,12 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Listen         string   `yaml:"listen"`
-	MaxBodyBytes   int64    `yaml:"maxBodyBytes"`
-	ReadTimeout    Duration `yaml:"readTimeout"`
-	RequestTimeout Duration `yaml:"requestTimeout"`
-	SwaggerEnabled bool     `yaml:"swaggerEnabled"`
+	Listen                string   `yaml:"listen"`
+	MaxBodyBytes          int64    `yaml:"maxBodyBytes"`
+	MaxConcurrentRequests int      `yaml:"maxConcurrentRequests"`
+	ReadTimeout           Duration `yaml:"readTimeout"`
+	RequestTimeout        Duration `yaml:"requestTimeout"`
+	SwaggerEnabled        bool     `yaml:"swaggerEnabled"`
 }
 
 type FrontendConfig struct {
@@ -113,15 +114,15 @@ type CompatConfig struct {
 }
 
 type ConsoleProviderConfig struct {
-	ResponsesURL              string  `yaml:"responsesURL"`
-	Cluster                   string  `yaml:"cluster"`
-	TeamID                    string  `yaml:"teamId"`
-	UserAgent                 string  `yaml:"userAgent"`
-	EnableSearchTools         bool    `yaml:"enableSearchTools"`
-	TimeoutSeconds            int     `yaml:"timeoutSeconds"`
-	QuotaLimit                int     `yaml:"quotaLimit"`
-	QuotaWindowSeconds        int     `yaml:"quotaWindowSeconds"`
-	StreamHeartbeatInterval   float64 `yaml:"streamHeartbeatInterval"` // seconds; 0 disables
+	ResponsesURL            string  `yaml:"responsesURL"`
+	Cluster                 string  `yaml:"cluster"`
+	TeamID                  string  `yaml:"teamId"`
+	UserAgent               string  `yaml:"userAgent"`
+	EnableSearchTools       bool    `yaml:"enableSearchTools"`
+	TimeoutSeconds          int     `yaml:"timeoutSeconds"`
+	QuotaLimit              int     `yaml:"quotaLimit"`
+	QuotaWindowSeconds      int     `yaml:"quotaWindowSeconds"`
+	StreamHeartbeatInterval float64 `yaml:"streamHeartbeatInterval"` // seconds; 0 disables
 }
 
 type BuildProviderConfig struct {
@@ -292,6 +293,9 @@ func (c Config) Validate() error {
 	if c.Server.MaxBodyBytes <= 0 || c.Server.MaxBodyBytes > maxServerBodyBytes {
 		return fmt.Errorf("server.maxBodyBytes 必须在 1 到 %d 字节之间", maxServerBodyBytes)
 	}
+	if c.Server.MaxConcurrentRequests < 1 || c.Server.MaxConcurrentRequests > 100000 {
+		return errors.New("server.maxConcurrentRequests 必须在 1 到 100000 之间")
+	}
 	if c.Server.ReadTimeout.Value() <= 0 || c.Server.ReadTimeout.Value() > maxReadTimeout {
 		return errors.New("server.readTimeout 必须大于零且不超过 1 小时")
 	}
@@ -444,10 +448,11 @@ func (c Config) Validate() error {
 func defaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Listen:         "127.0.0.1:8000",
-			MaxBodyBytes:   32 << 20,
-			ReadTimeout:    Duration(15 * time.Minute),
-			RequestTimeout: Duration(2 * time.Hour),
+			Listen:                "127.0.0.1:8000",
+			MaxBodyBytes:          32 << 20,
+			MaxConcurrentRequests: 1024,
+			ReadTimeout:           Duration(15 * time.Minute),
+			RequestTimeout:        Duration(2 * time.Hour),
 		},
 		Frontend: FrontendConfig{PublicAPIBaseURL: "http://127.0.0.1:8000", StaticPath: "./frontend/dist"},
 		Database: DatabaseConfig{
@@ -479,7 +484,7 @@ func defaultConfig() Config {
 			},
 			Console: ConsoleProviderConfig{
 				ResponsesURL: "https://console.x.ai/v1/responses", Cluster: "https://us-east-1.api.x.ai",
-				UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+				UserAgent:         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
 				EnableSearchTools: true, TimeoutSeconds: 300, QuotaLimit: 150, QuotaWindowSeconds: 86400,
 				StreamHeartbeatInterval: 15,
 			},
@@ -502,7 +507,7 @@ func defaultConfig() Config {
 		},
 		Audit:             AuditConfig{BufferSize: 16384, BatchSize: 256, FlushInterval: Duration(250 * time.Millisecond)},
 		ClientKeyDefaults: ClientKeyDefaultsConfig{RPMLimit: clientkeydomain.DefaultRPMLimit, MaxConcurrent: clientkeydomain.DefaultMaxConcurrent},
-		Compat: CompatConfig{LegacyAPIKeys: nil},
+		Compat:            CompatConfig{LegacyAPIKeys: nil},
 	}
 }
 

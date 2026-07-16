@@ -39,6 +39,7 @@ type Dependencies struct {
 	Logger             *slog.Logger
 	RequestTimeout     time.Duration
 	MaxBodyBytes       int64
+	ConcurrencyGate    *middleware.ConcurrencyGate
 	SecureCookies      bool
 	SwaggerEnabled     bool
 	PublicAPIBaseURL   string
@@ -78,6 +79,9 @@ func New(deps Dependencies) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
+	}
+	if deps.ConcurrencyGate == nil {
+		deps.ConcurrencyGate = middleware.NewConcurrencyGate(1024)
 	}
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders(), middleware.MaxBodyBytes(deps.MaxBodyBytes), middleware.Timeout(deps.RequestTimeout), middleware.AccessLog(deps.Logger))
@@ -131,6 +135,7 @@ func New(deps Dependencies) *gin.Engine {
 		})
 	}
 	v1.Use(middleware.ClientAuth(deps.ClientKeys))
+	v1.Use(deps.ConcurrencyGate.Middleware())
 	inference.NewHandler(deps.Gateway, deps.Models, deps.MaxBodyBytes).Register(v1)
 	registerFrontend(router, deps.FrontendStaticPath)
 	return router

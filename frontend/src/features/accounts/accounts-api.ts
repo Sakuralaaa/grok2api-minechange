@@ -95,6 +95,58 @@ export type AccountSummaryDTO = {
   issues: { disabled: number; reauthRequired: number };
 };
 
+export type BuildInspectionClassification = "healthy" | "permission_denied" | "quota_exhausted" | "reauth" | "model_unavailable" | "probe_error" | "unknown" | "cancelled";
+
+export type BuildInspectionResultDTO = {
+  accountId: string;
+  name: string;
+  email?: string;
+  disabled: boolean;
+  classification: BuildInspectionClassification;
+  action: "keep" | "enable" | "disable" | "delete";
+  reason: string;
+  httpStatus?: number;
+  model: string;
+  errorCode?: string;
+  errorMessage?: string;
+  durationMs: number;
+  inspectedAt: string;
+  applied?: boolean;
+  applyError?: string;
+};
+
+export type BuildInspectionSnapshotDTO = {
+  running: boolean;
+  stopped: boolean;
+  done: number;
+  total: number;
+  workers: number;
+  includeDisabled: boolean;
+  onlyDisabled: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  results: BuildInspectionResultDTO[];
+  summary: Partial<Record<BuildInspectionClassification, number>>;
+};
+
+export type BuildInspectionApplyResultDTO = { enabled: number; disabled: number; deleted: number; failed: number };
+
+export function getBuildInspectionStatus(): Promise<BuildInspectionSnapshotDTO> {
+  return apiRequest<BuildInspectionSnapshotDTO>("/api/admin/v1/accounts/inspection");
+}
+
+export function startBuildInspection(input: { workers: number; includeDisabled: boolean; onlyDisabled: boolean }): Promise<BuildInspectionSnapshotDTO> {
+  return apiRequest<BuildInspectionSnapshotDTO>("/api/admin/v1/accounts/inspection/start", { method: "POST", body: input });
+}
+
+export function stopBuildInspection(): Promise<BuildInspectionSnapshotDTO> {
+  return apiRequest<BuildInspectionSnapshotDTO>("/api/admin/v1/accounts/inspection/stop", { method: "POST" });
+}
+
+export function applyBuildInspectionRecommendations(ids: string[] = []): Promise<BuildInspectionApplyResultDTO> {
+  return apiRequest<BuildInspectionApplyResultDTO>("/api/admin/v1/accounts/inspection/apply", { method: "POST", body: { ids } });
+}
+
 export type DeviceSessionDTO = {
   sessionId: string;
   userCode: string;

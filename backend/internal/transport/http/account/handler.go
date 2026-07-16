@@ -129,6 +129,10 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.GET("/accounts", h.list)
 	router.GET("/accounts/summary", h.summary)
 	router.GET("/accounts/export", h.exportCredentials)
+	router.GET("/accounts/inspection", h.inspectionStatus)
+	router.POST("/accounts/inspection/start", h.startInspection)
+	router.POST("/accounts/inspection/stop", h.stopInspection)
+	router.POST("/accounts/inspection/apply", h.applyInspection)
 	router.GET("/accounts/:id", h.get)
 	router.POST("/accounts/device/start", h.startDevice)
 	router.POST("/accounts/device/:sessionId/poll", h.pollDevice)
@@ -155,6 +159,68 @@ type updateRequest struct {
 	Priority         *int     `json:"priority"`
 	MaxConcurrent    *int     `json:"maxConcurrent"`
 	MinimumRemaining *float64 `json:"minimumRemaining"`
+}
+
+type inspectionStartRequest struct {
+	Workers         int  `json:"workers"`
+	IncludeDisabled bool `json:"includeDisabled"`
+	OnlyDisabled    bool `json:"onlyDisabled"`
+}
+
+type inspectionApplyRequest struct {
+	IDs []string `json:"ids"`
+}
+
+func (h *Handler) inspectionStatus(c *gin.Context) {
+	response.Success(c, http.StatusOK, h.service.BuildInspectionSnapshot())
+}
+
+func (h *Handler) startInspection(c *gin.Context) {
+	var request inspectionStartRequest
+	if c.ShouldBindJSON(&request) != nil {
+		response.Error(c, http.StatusBadRequest, "invalidRequest", "巡检请求参数无效")
+		return
+	}
+	err := h.service.StartBuildInspection(c.Request.Context(), accountapp.BuildInspectionStartInput{
+		Workers: request.Workers, IncludeDisabled: request.IncludeDisabled, OnlyDisabled: request.OnlyDisabled,
+	})
+	if errors.Is(err, accountapp.ErrBuildInspectionRunning) {
+		response.Error(c, http.StatusConflict, "inspectionRunning", err.Error())
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "inspectionStartFailed", "启动 Grok Build 账号巡检失败")
+		return
+	}
+	response.Success(c, http.StatusAccepted, h.service.BuildInspectionSnapshot())
+}
+
+func (h *Handler) stopInspection(c *gin.Context) {
+	h.service.StopBuildInspection()
+	response.Success(c, http.StatusAccepted, h.service.BuildInspectionSnapshot())
+}
+
+func (h *Handler) applyInspection(c *gin.Context) {
+	var request inspectionApplyRequest
+	if c.ShouldBindJSON(&request) != nil {
+		response.Error(c, http.StatusBadRequest, "invalidRequest", "巡检处理请求参数无效")
+		return
+	}
+	ids, err := parseIDs(request.IDs)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalidId", err.Error())
+		return
+	}
+	result, err := h.service.ApplyBuildInspectionRecommendations(c.Request.Context(), ids)
+	if errors.Is(err, accountapp.ErrBuildInspectionRunning) {
+		response.Error(c, http.StatusConflict, "inspectionRunning", err.Error())
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "inspectionApplyFailed", "执行 Grok Build 账号巡检建议失败")
+		return
+	}
+	response.Success(c, http.StatusOK, result)
 }
 
 type batchUpdateRequest struct {
@@ -203,10 +269,10 @@ type accountTokenRefreshResponse struct {
 }
 
 type accountImportResponse struct {
-	Created    int                                `json:"created"`
-	Updated    int                                `json:"updated"`
-	Synced     int                                `json:"synced"`
-	SyncFailed int                                `json:"syncFailed"`
+	Created    int                                 `json:"created"`
+	Updated    int                                 `json:"updated"`
+	Synced     int                                 `json:"synced"`
+	SyncFailed int                                 `json:"syncFailed"`
 	ByProvider map[string]accountImportProviderDTO `json:"byProvider,omitempty"`
 }
 
@@ -821,7 +887,6 @@ func (h *Handler) writeServiceError(c *gin.Context, code string, err error, fall
 		response.Error(c, fallbackStatus, code, fallbackMessage)
 	}
 }
-
 
 func (h *Handler) batchRefreshTokens(c *gin.Context) {
 	var request batchDeleteRequest
