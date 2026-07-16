@@ -32,10 +32,20 @@ export const settingsSchema = z.object({
   }),
   providerBuild: z.object({
     baseURL: z.url(),
+    usingAPI: z.boolean(),
     clientVersion: z.string().trim().min(1),
     clientIdentifier: z.string().trim().min(1),
     tokenAuth: z.string().trim().min(1),
     userAgent: z.string().trim().min(1),
+  }),
+  buildInspection: z.object({
+    enabled: z.boolean(),
+    interval: durationSchema.refine((value) => durationSeconds(value) >= 300 && durationSeconds(value) <= 7 * 86_400),
+    workers: positiveInteger.max(16),
+    includeDisabled: z.boolean(),
+    quotaAction: z.enum(["keep", "cooldown", "disable", "delete"]),
+    forbiddenAction: z.enum(["keep", "refresh_then_delete", "disable", "delete"]),
+    quotaCooldown: durationSchema.refine((value) => durationSeconds(value) >= 3_600 && durationSeconds(value) <= 7 * 86_400),
   }),
   providerWeb: z.object({
     baseURL: z.url().refine((value) => value.startsWith("https://")),
@@ -96,6 +106,11 @@ export function toSettingsForm(config: SettingsConfigDTO): SettingsForm {
       streamHeartbeatInterval: config.providerConsole.streamHeartbeatInterval ?? 15,
     },
     providerBuild: config.providerBuild,
+    buildInspection: {
+      ...config.buildInspection,
+      interval: parseDuration(config.buildInspection.interval),
+      quotaCooldown: parseDuration(config.buildInspection.quotaCooldown),
+    },
     providerWeb: {
       ...config.providerWeb,
       statsigManualValue: "",
@@ -125,6 +140,11 @@ export function toSettingsDTO(config: SettingsForm): SettingsConfigDTO {
       streamHeartbeatInterval: config.providerConsole.streamHeartbeatInterval ?? 15,
     },
     providerBuild: config.providerBuild,
+    buildInspection: {
+      ...config.buildInspection,
+      interval: formatDuration(config.buildInspection.interval),
+      quotaCooldown: formatDuration(config.buildInspection.quotaCooldown),
+    },
     providerWeb: {
       ...config.providerWeb,
       quotaTimeout: formatDuration(config.providerWeb.quotaTimeout), chatTimeout: formatDuration(config.providerWeb.chatTimeout),

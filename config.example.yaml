@@ -88,10 +88,13 @@ compat:
 provider:
   build:
     baseURL: "https://cli-chat-proxy.grok.com/v1"
+    # OAuth 使用官方 api.x.ai 时需开启；推理、巡检和导出凭证共用该策略。
+    usingAPI: false
     clientVersion: "0.2.99"
     clientIdentifier: "grok-shell"
     tokenAuth: "xai-grok-cli"
     userAgent: "grok-shell/0.2.99 (linux; x86_64)"
+
   web:
     baseURL: "https://grok.com"
   console:
@@ -105,3 +108,13 @@ provider:
     quotaWindowSeconds: 86400
     # Stream SSE comment interval in seconds. 0 disables. Keep reverse-proxy idle timeout >= 3x this value.
     streamHeartbeatInterval: 15
+
+# Grok Build 账号自动巡检。只影响 Build 账号，不会处理 Web 或 Console。
+buildInspection:
+  enabled: true
+  interval: 6h
+  workers: 6
+  includeDisabled: true
+  quotaAction: cooldown
+  forbiddenAction: refresh_then_delete
+  quotaCooldown: 24h

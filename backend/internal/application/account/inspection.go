@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	buildInspectionModel       = "grok-4.5"
-	buildInspectionCallTimeout = 25 * time.Second
-	buildInspectionMaxWorkers  = 16
-	buildInspectionMaxAccounts = 10000
+	buildInspectionModel         = "grok-4.5"
+	buildInspectionCallTimeout   = 25 * time.Second
+	buildInspectionQuotaCooldown = 24 * time.Hour
+	buildInspectionMaxWorkers    = 16
+	buildInspectionMaxAccounts   = 10000
 )
 
 var ErrBuildInspectionRunning = errors.New("Grok Build 账号巡检正在运行")
@@ -35,21 +36,22 @@ type BuildInspectionStartInput struct {
 }
 
 type BuildInspectionResult struct {
-	AccountID      string    `json:"accountId"`
-	Name           string    `json:"name"`
-	Email          string    `json:"email,omitempty"`
-	Disabled       bool      `json:"disabled"`
-	Classification string    `json:"classification"`
-	Action         string    `json:"action"`
-	Reason         string    `json:"reason"`
-	HTTPStatus     int       `json:"httpStatus,omitempty"`
-	Model          string    `json:"model"`
-	ErrorCode      string    `json:"errorCode,omitempty"`
-	ErrorMessage   string    `json:"errorMessage,omitempty"`
-	DurationMS     int64     `json:"durationMs"`
-	InspectedAt    time.Time `json:"inspectedAt"`
-	Applied        bool      `json:"applied,omitempty"`
-	ApplyError     string    `json:"applyError,omitempty"`
+	AccountID      string     `json:"accountId"`
+	Name           string     `json:"name"`
+	Email          string     `json:"email,omitempty"`
+	Disabled       bool       `json:"disabled"`
+	Classification string     `json:"classification"`
+	Action         string     `json:"action"`
+	Reason         string     `json:"reason"`
+	HTTPStatus     int        `json:"httpStatus,omitempty"`
+	Model          string     `json:"model"`
+	ErrorCode      string     `json:"errorCode,omitempty"`
+	ErrorMessage   string     `json:"errorMessage,omitempty"`
+	DurationMS     int64      `json:"durationMs"`
+	InspectedAt    time.Time  `json:"inspectedAt"`
+	CooldownUntil  *time.Time `json:"cooldownUntil,omitempty"`
+	Applied        bool       `json:"applied,omitempty"`
+	ApplyError     string     `json:"applyError,omitempty"`
 }
 
 type BuildInspectionSnapshot struct {
@@ -60,6 +62,9 @@ type BuildInspectionSnapshot struct {
 	Workers         int                     `json:"workers"`
 	IncludeDisabled bool                    `json:"includeDisabled"`
 	OnlyDisabled    bool                    `json:"onlyDisabled"`
+	BaseURL         string                  `json:"baseURL,omitempty"`
+	ResolvedBaseURL string                  `json:"resolvedBaseURL,omitempty"`
+	UsingAPI        bool                    `json:"usingAPI"`
 	StartedAt       *time.Time              `json:"startedAt,omitempty"`
 	FinishedAt      *time.Time              `json:"finishedAt,omitempty"`
 	Results         []BuildInspectionResult `json:"results"`
@@ -67,10 +72,11 @@ type BuildInspectionSnapshot struct {
 }
 
 type BuildInspectionApplyResult struct {
-	Enabled  int `json:"enabled"`
-	Disabled int `json:"disabled"`
-	Deleted  int `json:"deleted"`
-	Failed   int `json:"failed"`
+	Enabled    int `json:"enabled"`
+	Disabled   int `json:"disabled"`
+	Deleted    int `json:"deleted"`
+	CooledDown int `json:"cooledDown"`
+	Failed     int `json:"failed"`
 }
 
 type buildProbeResponse struct {
@@ -96,13 +102,14 @@ func normalizeInspectionWorkers(value int) int {
 
 func (s *Service) StartBuildInspection(ctx context.Context, input BuildInspectionStartInput) error {
 	s.inspectionMu.Lock()
-	if s.inspection.Running {
+	if s.inspection.Running || s.automaticInspectionRunning {
 		s.inspectionMu.Unlock()
 		return ErrBuildInspectionRunning
 	}
 	s.inspectionMu.Unlock()
 
 	workers := normalizeInspectionWorkers(input.Workers)
+	strategy := s.buildInspectionStrategy()
 	values, total, err := s.accounts.List(ctx, repository.AccountListQuery{
 		Page:   repository.PageQuery{Limit: buildInspectionMaxAccounts + 1},
 		Filter: repository.AccountListFilter{Provider: string(accountdomain.ProviderBuild), Now: s.now()},
@@ -129,7 +136,7 @@ func (s *Service) StartBuildInspection(ctx context.Context, input BuildInspectio
 	}
 
 	s.inspectionMu.Lock()
-	if s.inspection.Running {
+	if s.inspection.Running || s.automaticInspectionRunning {
 		s.inspectionMu.Unlock()
 		return ErrBuildInspectionRunning
 	}
@@ -141,6 +148,7 @@ func (s *Service) StartBuildInspection(ctx context.Context, input BuildInspectio
 	s.inspection = BuildInspectionSnapshot{
 		Running: true, Done: 0, Total: len(targets), Workers: workers,
 		IncludeDisabled: input.IncludeDisabled, OnlyDisabled: input.OnlyDisabled,
+		BaseURL: strategy.BaseURL, ResolvedBaseURL: strategy.ResolvedBaseURL, UsingAPI: strategy.UsingAPI,
 		StartedAt: &startedAt, Results: []BuildInspectionResult{}, Summary: map[string]int{},
 	}
 	s.inspectionMu.Unlock()
@@ -162,7 +170,6 @@ func (s *Service) StopBuildInspection() {
 
 func (s *Service) BuildInspectionSnapshot() BuildInspectionSnapshot {
 	s.inspectionMu.Lock()
-	defer s.inspectionMu.Unlock()
 	value := s.inspection
 	value.Results = append([]BuildInspectionResult(nil), value.Results...)
 	value.Summary = make(map[string]int, len(s.inspection.Summary))
@@ -172,7 +179,25 @@ func (s *Service) BuildInspectionSnapshot() BuildInspectionSnapshot {
 	if value.Results == nil {
 		value.Results = []BuildInspectionResult{}
 	}
+	s.inspectionMu.Unlock()
+	strategy := s.buildInspectionStrategy()
+	value.BaseURL, value.ResolvedBaseURL, value.UsingAPI = strategy.BaseURL, strategy.ResolvedBaseURL, strategy.UsingAPI
 	return value
+}
+
+func (s *Service) buildInspectionStrategy() provider.BuildRuntimeStrategy {
+	if s.providers == nil {
+		return provider.BuildRuntimeStrategy{}
+	}
+	adapter, ok := s.providers.Responses(accountdomain.ProviderBuild)
+	if !ok {
+		return provider.BuildRuntimeStrategy{}
+	}
+	strategy, _ := adapter.(provider.BuildRuntimeStrategyAdapter)
+	if strategy == nil {
+		return provider.BuildRuntimeStrategy{}
+	}
+	return strategy.BuildRuntimeStrategy()
 }
 
 func (s *Service) runBuildInspection(ctx context.Context, runID uint64, targets []accountdomain.Credential, workers int) {
@@ -356,16 +381,16 @@ func classifyBuildInspection(response buildProbeResponse, disabled bool) buildPr
 	if disabled {
 		actionForDisable = "keep"
 	}
-	if response.Status == http.StatusUnauthorized || inspectionContains(blob, "token is expired", "token has been invalidated", "invalid_grant", "unauthorized") {
+	if response.Status == http.StatusUnauthorized || response.Status == http.StatusForbidden || inspectionContains(blob, "token is expired", "token has been invalidated", "invalid_grant", "unauthorized") {
 		return buildProbeClassification{"reauth", "delete", "认证已过期或失效", code, message}
 	}
-	if inspectionContains(blob, "free-usage-exhausted", "used all the included free usage", "included free usage has been exhausted") {
-		return buildProbeClassification{"quota_exhausted", actionForDisable, "额度已用尽", code, message}
+	if response.Status == http.StatusPaymentRequired || inspectionContains(blob, "free-usage-exhausted", "used all the included free usage", "included free usage has been exhausted") {
+		return buildProbeClassification{"quota_exhausted", "cooldown", "额度受限，建议进入 24 小时冷却池", code, message}
 	}
 	if response.Status == http.StatusTooManyRequests {
 		return buildProbeClassification{"probe_error", "keep", "临时限流 (HTTP 429)，建议稍后重试", code, message}
 	}
-	if response.Status == http.StatusPaymentRequired || response.Status == http.StatusForbidden || inspectionContains(blob, "permission-denied", "chat endpoint is denied", "deactivated", "suspended", "banned") {
+	if inspectionContains(blob, "permission-denied", "chat endpoint is denied", "deactivated", "suspended", "banned") {
 		return buildProbeClassification{"permission_denied", actionForDisable, fmt.Sprintf("对话权限被拒绝 (HTTP %d)", response.Status), code, message}
 	}
 	if response.Status == http.StatusNotFound || inspectionContains(blob, "not-found", "does not exist", "no access to it") {
@@ -470,7 +495,7 @@ func (s *Service) ApplyBuildInspectionRecommendations(ctx context.Context, accou
 		}
 	}
 	s.inspectionMu.Lock()
-	if s.inspection.Running {
+	if s.inspection.Running || s.automaticInspectionRunning {
 		s.inspectionMu.Unlock()
 		return BuildInspectionApplyResult{}, ErrBuildInspectionRunning
 	}
@@ -488,6 +513,7 @@ func (s *Service) ApplyBuildInspectionRecommendations(ctx context.Context, accou
 			}
 		}
 		var actionErr error
+		var cooldownUntil *time.Time
 		switch item.Action {
 		case "enable":
 			enabled := true
@@ -506,18 +532,23 @@ func (s *Service) ApplyBuildInspectionRecommendations(ctx context.Context, accou
 			if actionErr == nil {
 				result.Deleted++
 			}
+		case "cooldown":
+			cooldownUntil, actionErr = s.applyBuildInspectionCooldown(ctx, id, item.Disabled, buildInspectionQuotaCooldown)
+			if actionErr == nil {
+				result.CooledDown++
+			}
 		default:
 			continue
 		}
 		if actionErr != nil {
 			result.Failed++
 		}
-		s.markBuildInspectionApplied(item.AccountID, item.Action, actionErr)
+		s.markBuildInspectionApplied(item.AccountID, item.Action, cooldownUntil, actionErr)
 	}
 	return result, nil
 }
 
-func (s *Service) markBuildInspectionApplied(accountID, action string, actionErr error) {
+func (s *Service) markBuildInspectionApplied(accountID, action string, cooldownUntil *time.Time, actionErr error) {
 	s.inspectionMu.Lock()
 	defer s.inspectionMu.Unlock()
 	for index := range s.inspection.Results {
@@ -536,6 +567,9 @@ func (s *Service) markBuildInspectionApplied(accountID, action string, actionErr
 			item.Disabled = false
 		} else if action == "disable" {
 			item.Disabled = true
+		} else if action == "cooldown" {
+			item.Disabled = false
+			item.CooldownUntil = cooldownUntil
 		}
 		return
 	}

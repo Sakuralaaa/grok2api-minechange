@@ -206,6 +206,19 @@ type ResponseAdapter interface {
 	ForwardResponse(ctx context.Context, request ResponseResourceRequest) (*Response, error)
 }
 
+// BuildRuntimeStrategy is the resolved Grok Build request policy shared by
+// normal inference and account inspection.
+type BuildRuntimeStrategy struct {
+	BaseURL         string
+	ResolvedBaseURL string
+	UsingAPI        bool
+}
+
+type BuildRuntimeStrategyAdapter interface {
+	Adapter
+	BuildRuntimeStrategy() BuildRuntimeStrategy
+}
+
 type ModelCatalogAdapter interface {
 	Adapter
 	ListModels(ctx context.Context, credential account.Credential) ([]string, error)

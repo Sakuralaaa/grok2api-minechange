@@ -21,6 +21,7 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 
 type settingsConfigDTO struct {
 	ProviderBuild     providerBuildConfigDTO     `json:"providerBuild"`
+	BuildInspection   buildInspectionConfigDTO   `json:"buildInspection"`
 	ProviderWeb       providerWebConfigDTO       `json:"providerWeb"`
 	ProviderConsole   providerConsoleConfigDTO   `json:"providerConsole"`
 	Batch             batchConfigDTO             `json:"batch"`
@@ -51,10 +52,21 @@ type providerConsoleConfigDTO struct {
 
 type providerBuildConfigDTO struct {
 	BaseURL          string `json:"baseURL"`
+	UsingAPI         bool   `json:"usingAPI"`
 	ClientVersion    string `json:"clientVersion"`
 	ClientIdentifier string `json:"clientIdentifier"`
 	TokenAuth        string `json:"tokenAuth"`
 	UserAgent        string `json:"userAgent"`
+}
+
+type buildInspectionConfigDTO struct {
+	Enabled         bool   `json:"enabled"`
+	Interval        string `json:"interval"`
+	Workers         int    `json:"workers"`
+	IncludeDisabled bool   `json:"includeDisabled"`
+	QuotaAction     string `json:"quotaAction"`
+	ForbiddenAction string `json:"forbiddenAction"`
+	QuotaCooldown   string `json:"quotaCooldown"`
 }
 
 type providerWebConfigDTO struct {
@@ -152,9 +164,16 @@ func (value settingsConfigDTO) toApplication() settingsapp.EditableConfig {
 			TimeoutSeconds: value.ProviderConsole.TimeoutSeconds, QuotaLimit: value.ProviderConsole.QuotaLimit, QuotaWindowSeconds: value.ProviderConsole.QuotaWindowSeconds, StreamHeartbeatInterval: value.ProviderConsole.StreamHeartbeatInterval,
 		},
 		ProviderBuild: settingsapp.ProviderBuildConfig{
-			BaseURL: value.ProviderBuild.BaseURL, ClientVersion: value.ProviderBuild.ClientVersion,
+			BaseURL: value.ProviderBuild.BaseURL, UsingAPI: value.ProviderBuild.UsingAPI, ClientVersion: value.ProviderBuild.ClientVersion,
 			ClientIdentifier: value.ProviderBuild.ClientIdentifier, TokenAuth: value.ProviderBuild.TokenAuth,
 			UserAgent: value.ProviderBuild.UserAgent,
+		},
+		BuildInspection: settingsapp.BuildInspectionConfig{
+			Enabled: value.BuildInspection.Enabled, Interval: value.BuildInspection.Interval,
+			Workers: value.BuildInspection.Workers, IncludeDisabled: value.BuildInspection.IncludeDisabled,
+			QuotaAction:     value.BuildInspection.QuotaAction,
+			ForbiddenAction: value.BuildInspection.ForbiddenAction,
+			QuotaCooldown:   value.BuildInspection.QuotaCooldown,
 		},
 		ProviderWeb: settingsapp.ProviderWebConfig{
 			BaseURL: value.ProviderWeb.BaseURL, QuotaTimeout: value.ProviderWeb.QuotaTimeout,
@@ -192,14 +211,21 @@ func newSettingsResponse(value settingsapp.Snapshot) settingsResponse {
 	return settingsResponse{
 		Config: settingsConfigDTO{
 			ProviderConsole: providerConsoleConfigDTO{
-			ResponsesURL: value.Config.ProviderConsole.ResponsesURL, Cluster: value.Config.ProviderConsole.Cluster, TeamID: value.Config.ProviderConsole.TeamID,
-			UserAgent: value.Config.ProviderConsole.UserAgent, EnableSearchTools: value.Config.ProviderConsole.EnableSearchTools,
-			TimeoutSeconds: value.Config.ProviderConsole.TimeoutSeconds, QuotaLimit: value.Config.ProviderConsole.QuotaLimit, QuotaWindowSeconds: value.Config.ProviderConsole.QuotaWindowSeconds, StreamHeartbeatInterval: value.Config.ProviderConsole.StreamHeartbeatInterval,
-		},
-		ProviderBuild: providerBuildConfigDTO{
-				BaseURL: config.ProviderBuild.BaseURL, ClientVersion: config.ProviderBuild.ClientVersion,
+				ResponsesURL: value.Config.ProviderConsole.ResponsesURL, Cluster: value.Config.ProviderConsole.Cluster, TeamID: value.Config.ProviderConsole.TeamID,
+				UserAgent: value.Config.ProviderConsole.UserAgent, EnableSearchTools: value.Config.ProviderConsole.EnableSearchTools,
+				TimeoutSeconds: value.Config.ProviderConsole.TimeoutSeconds, QuotaLimit: value.Config.ProviderConsole.QuotaLimit, QuotaWindowSeconds: value.Config.ProviderConsole.QuotaWindowSeconds, StreamHeartbeatInterval: value.Config.ProviderConsole.StreamHeartbeatInterval,
+			},
+			ProviderBuild: providerBuildConfigDTO{
+				BaseURL: config.ProviderBuild.BaseURL, UsingAPI: config.ProviderBuild.UsingAPI, ClientVersion: config.ProviderBuild.ClientVersion,
 				ClientIdentifier: config.ProviderBuild.ClientIdentifier, TokenAuth: config.ProviderBuild.TokenAuth,
 				UserAgent: config.ProviderBuild.UserAgent,
+			},
+			BuildInspection: buildInspectionConfigDTO{
+				Enabled: config.BuildInspection.Enabled, Interval: config.BuildInspection.Interval,
+				Workers: config.BuildInspection.Workers, IncludeDisabled: config.BuildInspection.IncludeDisabled,
+				QuotaAction:     config.BuildInspection.QuotaAction,
+				ForbiddenAction: config.BuildInspection.ForbiddenAction,
+				QuotaCooldown:   config.BuildInspection.QuotaCooldown,
 			},
 			ProviderWeb: providerWebConfigDTO{
 				BaseURL: config.ProviderWeb.BaseURL, QuotaTimeout: config.ProviderWeb.QuotaTimeout,

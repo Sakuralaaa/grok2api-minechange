@@ -13,7 +13,13 @@ export type SettingsConfigDTO = {
     quotaWindowSeconds: number;
     streamHeartbeatInterval: number;
   };
-  providerBuild: { baseURL: string; clientVersion: string; clientIdentifier: string; tokenAuth: string; userAgent: string };
+  providerBuild: { baseURL: string; usingAPI: boolean; clientVersion: string; clientIdentifier: string; tokenAuth: string; userAgent: string };
+  buildInspection: {
+    enabled: boolean; interval: string; workers: number; includeDisabled: boolean;
+    quotaAction: "keep" | "cooldown" | "disable" | "delete";
+    forbiddenAction: "keep" | "refresh_then_delete" | "disable" | "delete";
+    quotaCooldown: string;
+  };
   providerWeb: {
     baseURL: string; quotaTimeout: string; chatTimeout: string; imageTimeout: string; videoTimeout: string;
     statsigMode: "manual" | "url"; statsigManualValue?: string; statsigManualConfigured: boolean; statsigSignerURL: string;

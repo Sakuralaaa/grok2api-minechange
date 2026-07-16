@@ -23,8 +23,14 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
+const (
+	officialAPIBaseURL  = "https://api.x.ai/v1"
+	cliChatProxyBaseURL = "https://cli-chat-proxy.grok.com/v1"
+)
+
 type Config struct {
 	BaseURL          string
+	UsingAPI         bool
 	ClientVersion    string
 	ClientIdentifier string
 	TokenAuth        string
@@ -61,6 +67,11 @@ func (a *Adapter) SetEgress(manager *infraegress.Manager) {
 }
 
 func (a *Adapter) Provider() account.Provider { return account.ProviderBuild }
+
+func (a *Adapter) BuildRuntimeStrategy() provider.BuildRuntimeStrategy {
+	cfg := a.config()
+	return provider.BuildRuntimeStrategy{BaseURL: strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"), ResolvedBaseURL: resolveBuildBaseURL(cfg), UsingAPI: cfg.UsingAPI}
+}
 
 func (a *Adapter) UpdateConfig(cfg Config) {
 	a.cfgMu.Lock()
@@ -340,7 +351,8 @@ func (a *Adapter) ParseImportedCredentials(data []byte) ([]provider.CredentialSe
 }
 
 func (a *Adapter) MarshalCredentials(values []provider.CredentialSeed) ([]byte, error) {
-	return marshalCredentials(values)
+	cfg := a.config()
+	return marshalCredentials(values, credentialExportOptions{UsingAPI: cfg.UsingAPI, BaseURL: cfg.BaseURL})
 }
 
 func (a *Adapter) applyHeaders(req *http.Request, credential account.Credential, accessToken, model, promptCacheKey string, trace bool) error {
@@ -466,7 +478,18 @@ func (b *gzipResponseBody) Close() error {
 }
 
 func (a *Adapter) url(path string) string {
-	return strings.TrimRight(a.config().BaseURL, "/") + "/" + strings.TrimLeft(path, "/")
+	return resolveBuildBaseURL(a.config()) + "/" + strings.TrimLeft(path, "/")
+}
+
+// resolveBuildBaseURL keeps OAuth Build behavior aligned with using_api:
+// official api.x.ai requires using_api=true, while custom non-default gateways
+// are always honored exactly as configured.
+func resolveBuildBaseURL(cfg Config) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if !cfg.UsingAPI && strings.EqualFold(baseURL, officialAPIBaseURL) {
+		return cliChatProxyBaseURL
+	}
+	return baseURL
 }
 
 func (a *Adapter) getBilling(ctx context.Context, credential account.Credential, accessToken, query string) (account.Billing, error) {

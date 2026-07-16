@@ -155,7 +155,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	mediaService := mediaapp.NewService(mediaAssetRepo, localMediaStore, refreshLock, mediaConfig(cfg))
 
 	egressManager := infraegress.NewManager(egressRepo, cipher)
-	cliAdapter := cliprovider.NewAdapter(cliprovider.Config{BaseURL: cfg.Provider.Build.BaseURL, ClientVersion: cfg.Provider.Build.ClientVersion, ClientIdentifier: cfg.Provider.Build.ClientIdentifier, TokenAuth: cfg.Provider.Build.TokenAuth, UserAgent: cfg.Provider.Build.UserAgent}, cipher)
+	cliAdapter := cliprovider.NewAdapter(cliprovider.Config{BaseURL: cfg.Provider.Build.BaseURL, UsingAPI: cfg.Provider.Build.UsingAPI, ClientVersion: cfg.Provider.Build.ClientVersion, ClientIdentifier: cfg.Provider.Build.ClientIdentifier, TokenAuth: cfg.Provider.Build.TokenAuth, UserAgent: cfg.Provider.Build.UserAgent}, cipher)
 	cliAdapter.SetEgress(egressManager)
 	webAdapter := webprovider.NewAdapter(webProviderConfig(cfg), egressManager, cipher, responseRepo, mediaService)
 	webAdapter.SetLogger(logger)
@@ -190,6 +190,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	accountService.SetLogger(logger)
 	accountService.SetQuotaRecoveryQueue(quotaQueue)
 	accountService.SetTaskPools(conversionPool, syncPool, refreshPool)
+	accountService.UpdateBuildInspectionConfig(buildInspectionConfig(cfg))
 	windows, err := accountRepo.ListQuotaRecoveryWindows(ctx, 100000)
 	if err != nil {
 		if runtimeStore != nil {
@@ -269,7 +270,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 			pool.UpdateJitter(next.Batch.RandomDelay.Value())
 		}
 		cliAdapter.UpdateConfig(cliprovider.Config{
-			BaseURL: next.Provider.Build.BaseURL, ClientVersion: next.Provider.Build.ClientVersion,
+			BaseURL: next.Provider.Build.BaseURL, UsingAPI: next.Provider.Build.UsingAPI, ClientVersion: next.Provider.Build.ClientVersion,
 			ClientIdentifier: next.Provider.Build.ClientIdentifier, TokenAuth: next.Provider.Build.TokenAuth,
 			UserAgent: next.Provider.Build.UserAgent,
 		})
@@ -280,6 +281,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		mediaService.UpdateConfig(mediaConfig(next))
 		quotaRecoveryService.UpdateConfig(next.Provider.Web.RecoveryBackoffBase.Value(), next.Provider.Web.RecoveryBackoffMax.Value())
 		accountSyncService.UpdateConcurrency(next.Batch.ImportConcurrency)
+		accountService.UpdateBuildInspectionConfig(buildInspectionConfig(next))
 		selector.UpdateConfig(next.Routing.StickyTTL.Value(), next.Routing.CooldownBase.Value(), next.Routing.CooldownMax.Value(), next.Routing.CapacityWait.Value())
 		gatewayService.UpdateMaxAttempts(next.Routing.MaxAttempts)
 		auditService.UpdateConfig(next.Audit.BatchSize, next.Audit.FlushInterval.Value())
@@ -322,6 +324,15 @@ func webProviderConfig(cfg config.Config) webprovider.Config {
 		ChatTimeoutSeconds: int(cfg.Provider.Web.ChatTimeout.Value().Seconds()), ImageTimeoutSeconds: int(cfg.Provider.Web.ImageTimeout.Value().Seconds()),
 		VideoTimeoutSeconds: int(cfg.Provider.Web.VideoTimeout.Value().Seconds()), MaxInputImageBytes: cfg.Media.MaxImageBytes,
 		AllowNSFW: cfg.Provider.Web.AllowNSFW,
+	}
+}
+
+func buildInspectionConfig(cfg config.Config) accountapp.BuildInspectionConfig {
+	return accountapp.BuildInspectionConfig{
+		Enabled: cfg.BuildInspection.Enabled, Interval: cfg.BuildInspection.Interval.Value(),
+		Workers: cfg.BuildInspection.Workers, IncludeDisabled: cfg.BuildInspection.IncludeDisabled,
+		QuotaAction: cfg.BuildInspection.QuotaAction, ForbiddenAction: cfg.BuildInspection.ForbiddenAction,
+		QuotaCooldown: cfg.BuildInspection.QuotaCooldown.Value(),
 	}
 }
 
@@ -400,6 +411,9 @@ func (a *Application) Run(ctx context.Context) error {
 	startBackground("credential_refresh", func(taskCtx context.Context) error {
 		a.accounts.RunCredentialRefresh(taskCtx)
 		return nil
+	})
+	startBackground("automatic_build_inspection", func(taskCtx context.Context) error {
+		return a.accounts.RunAutomaticBuildInspection(taskCtx)
 	})
 	startBackground("statsig_warmup", func(taskCtx context.Context) error {
 		a.runStatsigWarmup(taskCtx)

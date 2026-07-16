@@ -21,6 +21,7 @@ var (
 // ProviderBuildConfig 是管理接口使用的 Provider 可编辑输入。
 type ProviderBuildConfig struct {
 	BaseURL          string
+	UsingAPI         bool
 	ClientVersion    string
 	ClientIdentifier string
 	TokenAuth        string
@@ -33,18 +34,27 @@ type ProviderBuildRecommendation struct {
 	UserAgent     string
 }
 
-type ProviderConsoleConfig struct {
-	ResponsesURL              string
-	Cluster                   string
-	TeamID                    string
-	UserAgent                 string
-	EnableSearchTools         bool
-	TimeoutSeconds            int
-	QuotaLimit                int
-	QuotaWindowSeconds        int
-	StreamHeartbeatInterval   float64
+type BuildInspectionConfig struct {
+	Enabled         bool
+	Interval        string
+	Workers         int
+	IncludeDisabled bool
+	QuotaAction     string
+	ForbiddenAction string
+	QuotaCooldown   string
 }
 
+type ProviderConsoleConfig struct {
+	ResponsesURL            string
+	Cluster                 string
+	TeamID                  string
+	UserAgent               string
+	EnableSearchTools       bool
+	TimeoutSeconds          int
+	QuotaLimit              int
+	QuotaWindowSeconds      int
+	StreamHeartbeatInterval float64
+}
 
 type ProviderWebConfig struct {
 	BaseURL                 string
@@ -103,6 +113,7 @@ type ClientKeyDefaultsConfig struct {
 // EditableConfig 聚合管理端允许修改的运行参数。
 type EditableConfig struct {
 	ProviderBuild     ProviderBuildConfig
+	BuildInspection   BuildInspectionConfig
 	ProviderWeb       ProviderWebConfig
 	ProviderConsole   ProviderConsoleConfig
 	Batch             BatchConfig
@@ -244,9 +255,18 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 		capacityWait = base.Routing.CapacityWait.Value()
 	}
 	base.Provider.Build = config.BuildProviderConfig{
-		BaseURL: value.ProviderBuild.BaseURL, ClientVersion: value.ProviderBuild.ClientVersion,
+		BaseURL: value.ProviderBuild.BaseURL, UsingAPI: value.ProviderBuild.UsingAPI, ClientVersion: value.ProviderBuild.ClientVersion,
 		ClientIdentifier: value.ProviderBuild.ClientIdentifier, TokenAuth: value.ProviderBuild.TokenAuth,
 		UserAgent: value.ProviderBuild.UserAgent,
+	}
+	if value.BuildInspection.Interval > 0 {
+		base.BuildInspection = config.BuildInspectionConfig{
+			Enabled: value.BuildInspection.Enabled, Interval: config.Duration(value.BuildInspection.Interval),
+			Workers: value.BuildInspection.Workers, IncludeDisabled: value.BuildInspection.IncludeDisabled,
+			QuotaAction:     value.BuildInspection.QuotaAction,
+			ForbiddenAction: value.BuildInspection.ForbiddenAction,
+			QuotaCooldown:   config.Duration(value.BuildInspection.QuotaCooldown),
+		}
 	}
 	base.Provider.Console = config.ConsoleProviderConfig{
 		ResponsesURL: value.ProviderConsole.ResponsesURL, Cluster: value.ProviderConsole.Cluster, TeamID: value.ProviderConsole.TeamID,
@@ -291,9 +311,16 @@ func toDomainConfig(value config.Config) settingsdomain.Config {
 	randomDelay := value.Batch.RandomDelay.Value()
 	return settingsdomain.Config{
 		ProviderBuild: settingsdomain.ProviderBuildConfig{
-			BaseURL: value.Provider.Build.BaseURL, ClientVersion: value.Provider.Build.ClientVersion,
+			BaseURL: value.Provider.Build.BaseURL, UsingAPI: value.Provider.Build.UsingAPI, ClientVersion: value.Provider.Build.ClientVersion,
 			ClientIdentifier: value.Provider.Build.ClientIdentifier, TokenAuth: value.Provider.Build.TokenAuth,
 			UserAgent: value.Provider.Build.UserAgent,
+		},
+		BuildInspection: settingsdomain.BuildInspectionConfig{
+			Enabled: value.BuildInspection.Enabled, Interval: value.BuildInspection.Interval.Value(),
+			Workers: value.BuildInspection.Workers, IncludeDisabled: value.BuildInspection.IncludeDisabled,
+			QuotaAction:     value.BuildInspection.QuotaAction,
+			ForbiddenAction: value.BuildInspection.ForbiddenAction,
+			QuotaCooldown:   value.BuildInspection.QuotaCooldown.Value(),
 		},
 		ProviderConsole: settingsdomain.ProviderConsoleConfig{
 			ResponsesURL: value.Provider.Console.ResponsesURL, Cluster: value.Provider.Console.Cluster, TeamID: value.Provider.Console.TeamID,
@@ -352,10 +379,28 @@ func (s *Service) snapshotLocked() Snapshot {
 func mergeEditable(current config.Config, input EditableConfig) (config.Config, error) {
 	next := current
 	next.Provider.Build.BaseURL = strings.TrimSpace(input.ProviderBuild.BaseURL)
+	next.Provider.Build.UsingAPI = input.ProviderBuild.UsingAPI
 	next.Provider.Build.ClientVersion = strings.TrimSpace(input.ProviderBuild.ClientVersion)
 	next.Provider.Build.ClientIdentifier = strings.TrimSpace(input.ProviderBuild.ClientIdentifier)
 	next.Provider.Build.TokenAuth = strings.TrimSpace(input.ProviderBuild.TokenAuth)
 	next.Provider.Build.UserAgent = strings.TrimSpace(input.ProviderBuild.UserAgent)
+	if strings.TrimSpace(input.BuildInspection.Interval) != "" || strings.TrimSpace(input.BuildInspection.QuotaCooldown) != "" {
+		inspectionInterval, err := time.ParseDuration(strings.TrimSpace(input.BuildInspection.Interval))
+		if err != nil {
+			return config.Config{}, fmt.Errorf("解析自动巡检间隔: %w", err)
+		}
+		quotaCooldown, err := time.ParseDuration(strings.TrimSpace(input.BuildInspection.QuotaCooldown))
+		if err != nil {
+			return config.Config{}, fmt.Errorf("解析巡检额度冷却时长: %w", err)
+		}
+		next.BuildInspection = config.BuildInspectionConfig{
+			Enabled: input.BuildInspection.Enabled, Interval: config.Duration(inspectionInterval),
+			Workers: input.BuildInspection.Workers, IncludeDisabled: input.BuildInspection.IncludeDisabled,
+			QuotaAction:     strings.TrimSpace(input.BuildInspection.QuotaAction),
+			ForbiddenAction: strings.TrimSpace(input.BuildInspection.ForbiddenAction),
+			QuotaCooldown:   config.Duration(quotaCooldown),
+		}
+	}
 	next.Provider.Console.ResponsesURL = strings.TrimSpace(input.ProviderConsole.ResponsesURL)
 	next.Provider.Console.Cluster = strings.TrimSpace(input.ProviderConsole.Cluster)
 	next.Provider.Console.TeamID = strings.TrimSpace(input.ProviderConsole.TeamID)
@@ -434,9 +479,16 @@ func mergeEditable(current config.Config, input EditableConfig) (config.Config, 
 func toEditable(cfg config.Config) EditableConfig {
 	return EditableConfig{
 		ProviderBuild: ProviderBuildConfig{
-			BaseURL: cfg.Provider.Build.BaseURL, ClientVersion: cfg.Provider.Build.ClientVersion,
+			BaseURL: cfg.Provider.Build.BaseURL, UsingAPI: cfg.Provider.Build.UsingAPI, ClientVersion: cfg.Provider.Build.ClientVersion,
 			ClientIdentifier: cfg.Provider.Build.ClientIdentifier, TokenAuth: cfg.Provider.Build.TokenAuth,
 			UserAgent: cfg.Provider.Build.UserAgent,
+		},
+		BuildInspection: BuildInspectionConfig{
+			Enabled: cfg.BuildInspection.Enabled, Interval: cfg.BuildInspection.Interval.String(),
+			Workers: cfg.BuildInspection.Workers, IncludeDisabled: cfg.BuildInspection.IncludeDisabled,
+			QuotaAction:     cfg.BuildInspection.QuotaAction,
+			ForbiddenAction: cfg.BuildInspection.ForbiddenAction,
+			QuotaCooldown:   cfg.BuildInspection.QuotaCooldown.String(),
 		},
 		ProviderConsole: ProviderConsoleConfig{
 			ResponsesURL: cfg.Provider.Console.ResponsesURL, Cluster: cfg.Provider.Console.Cluster, TeamID: cfg.Provider.Console.TeamID,

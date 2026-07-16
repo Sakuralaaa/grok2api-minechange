@@ -182,7 +182,7 @@ export function AccountsPage() {
     onSuccess: (value) => {
       invalidateAccountData();
       void inspectionQuery.refetch();
-      toast.success(`建议处理完成：启用 ${value.enabled}，禁用 ${value.disabled}，删除 ${value.deleted}，失败 ${value.failed}`);
+      toast.success(`建议处理完成：启用 ${value.enabled}，禁用 ${value.disabled}，冷却 ${value.cooledDown}，删除 ${value.deleted}，失败 ${value.failed}`);
     },
     onError: showError,
   });
@@ -633,7 +633,7 @@ export function AccountsPage() {
             ) : (
               <div className="flex items-center gap-1.5">
                 {provider === "grok_web" && webSummary.total > 0 ? <Button variant="secondary" size="sm" onClick={() => setConversionTargets("all")}>{t("accountBulk.convertAllToBuild")}</Button> : null}
-                {provider === "grok_build" && buildSummary.total > 0 ? <Button variant="secondary" size="sm" onClick={() => setInspectionOpen(true)}><ShieldCheck />账号巡检</Button> : null}
+                {provider === "grok_build" && buildSummary.total > 0 ? <Button variant="secondary" size="sm" onClick={() => { setInspectionOpen(true); void inspectionQuery.refetch(); }}><ShieldCheck />账号巡检</Button> : null}
                 {hasAccounts ? <Button variant="secondary" size="sm" onClick={() => setSyncAllOpen(true)}>{t("accounts.syncAll")}</Button> : null}
                 {hasAccounts && provider === "grok_build" ? <Button variant="secondary" size="sm" onClick={() => setRenewAllOpen(true)}><RotateCw />{t("accounts.renewAll")}</Button> : null}
                 <DropdownMenu>
@@ -857,6 +857,7 @@ export function AccountsPage() {
             </div>
           </div>
           <InspectionSummary snapshot={inspectionQuery.data} loading={inspectionQuery.isPending} />
+          {inspectionQuery.data?.resolvedBaseURL ? <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"><Badge variant="outline">using_api: {inspectionQuery.data.usingAPI ? "true" : "false"}</Badge><span className="text-muted-foreground">实际巡检链路</span><code className="break-all">{inspectionQuery.data.resolvedBaseURL}</code>{inspectionQuery.data.baseURL && inspectionQuery.data.baseURL !== inspectionQuery.data.resolvedBaseURL ? <span className="text-muted-foreground">（配置地址：{inspectionQuery.data.baseURL}）</span> : null}</div> : null}
           <div className="max-h-[52vh] overflow-auto rounded-lg border">
             <Table className="min-w-[900px]">
               <TableHeader><TableRow><TableHead>账号</TableHead><TableHead>结果</TableHead><TableHead>建议</TableHead><TableHead>状态</TableHead><TableHead>原因</TableHead><TableHead className="text-right">耗时</TableHead></TableRow></TableHeader>
@@ -868,7 +869,7 @@ export function AccountsPage() {
             </Table>
           </div>
           <DialogFooter className="items-center sm:justify-between">
-            <span className="text-xs text-muted-foreground">建议操作只处理启用、禁用和删除；临时限流、模型不可用和探测异常会保留。</span>
+            <span className="text-xs text-muted-foreground">403 凭证失效建议删除；402/额度用尽建议进入 24 小时冷却池，到期自动恢复。临时 429、模型不可用和探测异常会保留。</span>
             <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => setInspectionOpen(false)}>关闭</Button><Button size="sm" disabled={inspectionQuery.data?.running || !inspectionQuery.data?.results.some((item) => item.action !== "keep") || applyInspectionMutation.isPending} onClick={() => applyInspectionMutation.mutate()}>{applyInspectionMutation.isPending ? <Spinner /> : null}执行全部建议</Button></div>
           </DialogFooter>
         </DialogContent>
@@ -963,7 +964,8 @@ function InspectionSummary({ snapshot, loading }: { snapshot?: BuildInspectionSn
 }
 
 function InspectionResultRow({ item }: { item: BuildInspectionResultDTO }) {
-  const actionLabel = item.action === "enable" ? "启用" : item.action === "disable" ? "禁用" : item.action === "delete" ? "删除" : "保留";
+  const { i18n } = useTranslation();
+  const actionLabel = item.action === "enable" ? "启用" : item.action === "disable" ? "禁用" : item.action === "delete" ? "删除" : item.action === "cooldown" ? "冷却 24h" : "保留";
   const classificationClass = item.classification === "healthy"
     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     : item.classification === "reauth" || item.classification === "permission_denied"
@@ -976,7 +978,7 @@ function InspectionResultRow({ item }: { item: BuildInspectionResultDTO }) {
       <TableCell><div className="max-w-48 truncate text-sm font-medium" title={item.name}>{item.name}</div><div className="max-w-48 truncate text-xs text-muted-foreground" title={item.email}>{item.email || `#${item.accountId}`}</div></TableCell>
       <TableCell><Badge variant="secondary" className={classificationClass}>{inspectionClassificationLabels[item.classification]}</Badge></TableCell>
       <TableCell><Badge variant={item.action === "delete" ? "destructive" : "outline"}>{item.applied ? "已处理" : actionLabel}</Badge>{item.applyError ? <div className="mt-1 max-w-40 text-xs text-destructive">{item.applyError}</div> : null}</TableCell>
-      <TableCell className="text-xs tabular-nums">{item.httpStatus || "-"}{item.disabled ? <span className="ml-2 text-muted-foreground">已禁用</span> : null}</TableCell>
+      <TableCell className="text-xs tabular-nums">{item.httpStatus || "-"}{item.disabled ? <span className="ml-2 text-muted-foreground">已禁用</span> : null}{item.cooldownUntil ? <div className="mt-1 text-muted-foreground">冷却至 {formatDateTime(item.cooldownUntil, i18n.language)}</div> : null}</TableCell>
       <TableCell><div className="max-w-80 text-xs">{item.reason}</div>{item.errorMessage ? <div className="mt-1 max-w-80 truncate text-xs text-muted-foreground" title={item.errorMessage}>{item.errorCode ? `${item.errorCode}: ` : ""}{item.errorMessage}</div> : null}</TableCell>
       <TableCell className="text-right text-xs tabular-nums">{item.durationMs} ms</TableCell>
     </TableRow>

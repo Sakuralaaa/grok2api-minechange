@@ -45,6 +45,10 @@ func TestUpdatePersistsAppliesAndReportsRestart(t *testing.T) {
 	service := NewService(cfg, time.Time{}, 0, repository, nil, func(next config.Config) { applied = next })
 	input := service.Get().Config
 	input.Routing.MaxAttempts = 5
+	input.ProviderBuild.UsingAPI = true
+	input.BuildInspection.Interval = "12h"
+	input.BuildInspection.QuotaAction = "disable"
+	input.BuildInspection.ForbiddenAction = "keep"
 	input.Audit.BufferSize = cfg.Audit.BufferSize + 1
 	input.Media.MaxTotalBytes = 2 << 30
 	input.Media.CleanupThresholdPercent = 75
@@ -57,6 +61,12 @@ func TestUpdatePersistsAppliesAndReportsRestart(t *testing.T) {
 	}
 	if applied.Routing.MaxAttempts != 5 {
 		t.Fatalf("runtime configuration was not applied: %#v", applied.Routing)
+	}
+	if !applied.Provider.Build.UsingAPI {
+		t.Fatalf("Build using_api was not applied: %#v", applied.Provider.Build)
+	}
+	if applied.BuildInspection.Interval.Value() != 12*time.Hour || applied.BuildInspection.QuotaAction != "disable" || applied.BuildInspection.ForbiddenAction != "keep" {
+		t.Fatalf("automatic Build inspection was not applied: %#v", applied.BuildInspection)
 	}
 	if applied.Media.MaxTotalBytes != 2<<30 || applied.Media.CleanupThresholdPercent != 75 || applied.Media.CleanupInterval.Value() != 5*time.Minute {
 		t.Fatalf("media configuration was not applied: %#v", applied.Media)
@@ -71,7 +81,7 @@ func TestUpdatePersistsAppliesAndReportsRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.Routing.MaxAttempts != 5 || reloaded.Audit.BufferSize != input.Audit.BufferSize || reloaded.Media.MaxTotalBytes != 2<<30 || reloaded.Media.CleanupThresholdPercent != 75 || reloaded.Batch.SyncConcurrency != 28 || reloaded.Batch.RandomDelay.Value() != 750*time.Millisecond {
+	if reloaded.Routing.MaxAttempts != 5 || !reloaded.Provider.Build.UsingAPI || reloaded.BuildInspection.Interval.Value() != 12*time.Hour || reloaded.BuildInspection.QuotaAction != "disable" || reloaded.Audit.BufferSize != input.Audit.BufferSize || reloaded.Media.MaxTotalBytes != 2<<30 || reloaded.Media.CleanupThresholdPercent != 75 || reloaded.Batch.SyncConcurrency != 28 || reloaded.Batch.RandomDelay.Value() != 750*time.Millisecond {
 		t.Fatalf("configuration was not persisted")
 	}
 }

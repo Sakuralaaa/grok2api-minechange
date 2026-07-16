@@ -76,6 +76,16 @@ func TestDefaultGrokBuildClientVersionMatchesLocalBaseline(t *testing.T) {
 	if build.UserAgent != RecommendedBuildUserAgent {
 		t.Fatalf("userAgent = %q", build.UserAgent)
 	}
+	if build.UsingAPI {
+		t.Fatal("usingAPI should remain opt-in by default")
+	}
+	inspection := defaultConfig().BuildInspection
+	if !inspection.Enabled || inspection.Interval.Value() != 6*time.Hour || inspection.QuotaCooldown.Value() != 24*time.Hour {
+		t.Fatalf("automatic Build inspection defaults = %#v", inspection)
+	}
+	if inspection.QuotaAction != "cooldown" || inspection.ForbiddenAction != "refresh_then_delete" {
+		t.Fatalf("automatic Build inspection actions = %#v", inspection)
+	}
 }
 
 func TestLoadAcceptsRuntimeDefaultsAndRejectsUnknownFields(t *testing.T) {

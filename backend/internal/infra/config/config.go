@@ -45,6 +45,7 @@ type Config struct {
 	Secrets           Secrets                 `yaml:"secrets"`
 	BootstrapAdmin    BootstrapAdminConfig    `yaml:"bootstrapAdmin"`
 	Provider          ProviderConfig          `yaml:"provider"`
+	BuildInspection   BuildInspectionConfig   `yaml:"buildInspection"`
 	Batch             BatchConfig             `yaml:"-"`
 	Media             MediaConfig             `yaml:"media"`
 	Routing           RoutingConfig           `yaml:"routing"`
@@ -127,10 +128,22 @@ type ConsoleProviderConfig struct {
 
 type BuildProviderConfig struct {
 	BaseURL          string `yaml:"baseURL"`
+	UsingAPI         bool   `yaml:"usingAPI"`
 	ClientVersion    string `yaml:"clientVersion"`
 	ClientIdentifier string `yaml:"clientIdentifier"`
 	TokenAuth        string `yaml:"tokenAuth"`
 	UserAgent        string `yaml:"userAgent"`
+}
+
+// BuildInspectionConfig defines the automatic Grok Build credential inspection policy.
+type BuildInspectionConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	Interval        Duration `yaml:"interval"`
+	Workers         int      `yaml:"workers"`
+	IncludeDisabled bool     `yaml:"includeDisabled"`
+	QuotaAction     string   `yaml:"quotaAction"`
+	ForbiddenAction string   `yaml:"forbiddenAction"`
+	QuotaCooldown   Duration `yaml:"quotaCooldown"`
 }
 
 type WebProviderConfig struct {
@@ -379,6 +392,21 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Provider.Build.ClientVersion) == "" || strings.TrimSpace(c.Provider.Build.ClientIdentifier) == "" || strings.TrimSpace(c.Provider.Build.TokenAuth) == "" || strings.TrimSpace(c.Provider.Build.UserAgent) == "" {
 		return errors.New("provider.build 客户端标识不能为空")
 	}
+	if c.BuildInspection.Interval.Value() < 5*time.Minute || c.BuildInspection.Interval.Value() > 7*24*time.Hour {
+		return errors.New("buildInspection.interval 必须在 5 分钟到 7 天之间")
+	}
+	if c.BuildInspection.Workers < 1 || c.BuildInspection.Workers > 16 {
+		return errors.New("buildInspection.workers 必须在 1 到 16 之间")
+	}
+	if c.BuildInspection.QuotaCooldown.Value() < time.Hour || c.BuildInspection.QuotaCooldown.Value() > 7*24*time.Hour {
+		return errors.New("buildInspection.quotaCooldown 必须在 1 小时到 7 天之间")
+	}
+	if c.BuildInspection.QuotaAction != "keep" && c.BuildInspection.QuotaAction != "cooldown" && c.BuildInspection.QuotaAction != "disable" && c.BuildInspection.QuotaAction != "delete" {
+		return errors.New("buildInspection.quotaAction 必须是 keep、cooldown、disable 或 delete")
+	}
+	if c.BuildInspection.ForbiddenAction != "keep" && c.BuildInspection.ForbiddenAction != "refresh_then_delete" && c.BuildInspection.ForbiddenAction != "disable" && c.BuildInspection.ForbiddenAction != "delete" {
+		return errors.New("buildInspection.forbiddenAction 必须是 keep、refresh_then_delete、disable 或 delete")
+	}
 	webURL, err := url.ParseRequestURI(strings.TrimSpace(c.Provider.Web.BaseURL))
 	if err != nil || webURL.Scheme != "https" || webURL.Host == "" || webURL.User != nil {
 		return errors.New("provider.web.baseURL 必须是无凭据的 HTTPS URL")
@@ -470,7 +498,7 @@ func defaultConfig() Config {
 		},
 		Provider: ProviderConfig{
 			Build: BuildProviderConfig{
-				BaseURL: "https://cli-chat-proxy.grok.com/v1", ClientVersion: RecommendedBuildClientVersion,
+				BaseURL: "https://cli-chat-proxy.grok.com/v1", UsingAPI: false, ClientVersion: RecommendedBuildClientVersion,
 				ClientIdentifier: "grok-shell", TokenAuth: "xai-grok-cli",
 				UserAgent: RecommendedBuildUserAgent,
 			},
@@ -488,6 +516,10 @@ func defaultConfig() Config {
 				EnableSearchTools: true, TimeoutSeconds: 300, QuotaLimit: 150, QuotaWindowSeconds: 86400,
 				StreamHeartbeatInterval: 15,
 			},
+		},
+		BuildInspection: BuildInspectionConfig{
+			Enabled: true, Interval: Duration(6 * time.Hour), Workers: 6, IncludeDisabled: true,
+			QuotaAction: "cooldown", ForbiddenAction: "refresh_then_delete", QuotaCooldown: Duration(24 * time.Hour),
 		},
 		Batch: BatchConfig{
 			ImportConcurrency: 25, ConversionConcurrency: 25, SyncConcurrency: 25,

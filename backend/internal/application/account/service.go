@@ -229,32 +229,36 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 
 // Service 负责 OAuth 账号接入、刷新、额度和持久化生命周期。
 type Service struct {
-	accounts              repository.AccountRepository
-	audits                repository.AuditRepository
-	deviceSessions        repository.DeviceSessionRepository
-	sticky                repository.StickySessionRepository
-	refreshLock           repository.DistributedLock
-	quotaQueue            repository.QuotaRecoveryQueue
-	providers             *provider.Registry
-	cipher                *security.Cipher
-	refreshes             singleflight.Group
-	billingSyncs          singleflight.Group
-	quotaSyncs            singleflight.Group
-	refreshMu             sync.Mutex
-	lastRefreshAt         map[uint64]time.Time
-	quotaRefreshMu        sync.Mutex
-	quotaRefreshes        map[string]*webQuotaRefreshState
-	quotaRefreshQueue     chan webQuotaRefreshRequest
-	conversionPool        *batch.Pool
-	syncPool              *batch.Pool
-	refreshPool           *batch.Pool
-	credentialRefreshWake chan struct{}
-	logger                *slog.Logger
-	now                   func() time.Time
-	inspectionMu          sync.Mutex
-	inspectionRunID       uint64
-	inspectionCancel      context.CancelFunc
-	inspection            BuildInspectionSnapshot
+	accounts                   repository.AccountRepository
+	audits                     repository.AuditRepository
+	deviceSessions             repository.DeviceSessionRepository
+	sticky                     repository.StickySessionRepository
+	refreshLock                repository.DistributedLock
+	quotaQueue                 repository.QuotaRecoveryQueue
+	providers                  *provider.Registry
+	cipher                     *security.Cipher
+	refreshes                  singleflight.Group
+	billingSyncs               singleflight.Group
+	quotaSyncs                 singleflight.Group
+	refreshMu                  sync.Mutex
+	lastRefreshAt              map[uint64]time.Time
+	quotaRefreshMu             sync.Mutex
+	quotaRefreshes             map[string]*webQuotaRefreshState
+	quotaRefreshQueue          chan webQuotaRefreshRequest
+	conversionPool             *batch.Pool
+	syncPool                   *batch.Pool
+	refreshPool                *batch.Pool
+	credentialRefreshWake      chan struct{}
+	logger                     *slog.Logger
+	now                        func() time.Time
+	inspectionMu               sync.Mutex
+	inspectionRunID            uint64
+	inspectionCancel           context.CancelFunc
+	inspection                 BuildInspectionSnapshot
+	automaticInspectionRunning bool
+	buildInspectionConfigMu    sync.RWMutex
+	buildInspectionConfig      BuildInspectionConfig
+	buildInspectionWake        chan struct{}
 }
 
 func (s *Service) SetQuotaRecoveryQueue(queue repository.QuotaRecoveryQueue) {
@@ -268,6 +272,7 @@ func NewService(accounts repository.AccountRepository, audits repository.AuditRe
 		lastRefreshAt: make(map[uint64]time.Time), quotaRefreshes: make(map[string]*webQuotaRefreshState),
 		quotaRefreshQueue:     make(chan webQuotaRefreshRequest, webQuotaRefreshQueueSize),
 		credentialRefreshWake: make(chan struct{}, 1),
+		buildInspectionWake:   make(chan struct{}, 1),
 		conversionPool:        batch.NewPool(25), syncPool: batch.NewPool(25), refreshPool: batch.NewPool(25), logger: slog.Default(),
 		now: func() time.Time { return time.Now().UTC() },
 	}

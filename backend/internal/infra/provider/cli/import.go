@@ -23,6 +23,8 @@ type credentialImportDocument struct {
 type importedCredentialEntry struct {
 	Provider     string `json:"provider"`
 	Name         string `json:"name"`
+	UsingAPI     bool   `json:"using_api"`
+	BaseURL      string `json:"base_url,omitempty"`
 	ClientID     string `json:"client_id"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -37,11 +39,16 @@ type importedCredentialEntry struct {
 	TeamID       string `json:"team_id"`
 }
 
-func marshalCredentials(values []provider.CredentialSeed) ([]byte, error) {
+type credentialExportOptions struct {
+	UsingAPI bool
+	BaseURL  string
+}
+
+func marshalCredentials(values []provider.CredentialSeed, options credentialExportOptions) ([]byte, error) {
 	document := credentialImportDocument{Accounts: make([]importedCredentialEntry, 0, len(values))}
 	for _, value := range values {
 		entry := importedCredentialEntry{
-			Provider: credentialImportProvider, Name: value.Name, ClientID: value.OIDCClientID,
+			Provider: credentialImportProvider, Name: value.Name, UsingAPI: options.UsingAPI, BaseURL: strings.TrimSpace(options.BaseURL), ClientID: value.OIDCClientID,
 			AccessToken: value.AccessToken, RefreshToken: value.RefreshToken, TokenType: "Bearer",
 			Email: value.Email, UserID: value.UserID, TeamID: value.TeamID,
 		}

@@ -32,7 +32,9 @@ func TestRuntimeSettingsRepositoryRoundTrip(t *testing.T) {
 		t.Fatalf("initial get found = %v, err = %v", found, err)
 	}
 	settings := settingsdomain.Config{
-		ProviderWeb: settingsdomain.ProviderWebConfig{StatsigManualValue: "sensitive-statsig-value"},
+		ProviderBuild:   settingsdomain.ProviderBuildConfig{BaseURL: "https://api.x.ai/v1", UsingAPI: true},
+		BuildInspection: settingsdomain.BuildInspectionConfig{Enabled: true, Interval: 6 * time.Hour, Workers: 6, IncludeDisabled: true, QuotaAction: "cooldown", ForbiddenAction: "refresh_then_delete", QuotaCooldown: 24 * time.Hour},
+		ProviderWeb:     settingsdomain.ProviderWebConfig{StatsigManualValue: "sensitive-statsig-value"},
 		Media: settingsdomain.MediaConfig{
 			MaxImageBytes: 16 << 20, MaxTotalBytes: 1 << 30, CleanupThresholdPercent: 80,
 			CleanupInterval: 10 * time.Minute,
@@ -47,11 +49,14 @@ func TestRuntimeSettingsRepositoryRoundTrip(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("saved get found = %v, err = %v", found, err)
 	}
-	if value.Routing != settings.Routing || value.Media != settings.Media || !storedUpdatedAt.Equal(updatedAt) || revision != 1 || storedRevision != revision {
+	if value.Routing != settings.Routing || value.Media != settings.Media || value.BuildInspection != settings.BuildInspection || !storedUpdatedAt.Equal(updatedAt) || revision != 1 || storedRevision != revision {
 		t.Fatalf("saved value = %#v", value)
 	}
 	if value.ProviderWeb.StatsigManualValue != settings.ProviderWeb.StatsigManualValue {
 		t.Fatalf("Statsig manual value = %q", value.ProviderWeb.StatsigManualValue)
+	}
+	if !value.ProviderBuild.UsingAPI || value.ProviderBuild.BaseURL != settings.ProviderBuild.BaseURL {
+		t.Fatalf("Build settings = %#v", value.ProviderBuild)
 	}
 	var row runtimeSettingsModel
 	if err := database.db.WithContext(ctx).Where("key = ?", runtimeSettingsKey).First(&row).Error; err != nil {

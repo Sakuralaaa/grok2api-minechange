@@ -1,6 +1,7 @@
 package account
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"path/filepath"
@@ -46,7 +47,7 @@ func TestExportCredentialsRoundTripsImportFormat(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	adapter := cliprovider.NewAdapter(cliprovider.Config{}, cipher)
+	adapter := cliprovider.NewAdapter(cliprovider.Config{BaseURL: "https://api.x.ai/v1", UsingAPI: true}, cipher)
 	service := NewService(repository, nil, nil, nil, provider.NewRegistry(adapter), cipher, nil)
 
 	result, err := service.ExportCredentials(ctx)
@@ -59,6 +60,9 @@ func TestExportCredentialsRoundTripsImportFormat(t *testing.T) {
 	}
 	if result.Count != 1 || len(values) != 1 {
 		t.Fatalf("export count = %d, imported values = %d", result.Count, len(values))
+	}
+	if !bytes.Contains(result.Data, []byte(`"using_api": true`)) || !bytes.Contains(result.Data, []byte(`"base_url": "https://api.x.ai/v1"`)) {
+		t.Fatalf("export strategy metadata missing: %s", result.Data)
 	}
 	value := values[0]
 	if value.Name != "primary" || value.Email != "user@example.com" || value.UserID != "user-1" || value.OIDCClientID != "client-1" || value.AccessToken != "access-token" || value.RefreshToken != "refresh-token" || !value.ExpiresAt.Equal(expiresAt) {

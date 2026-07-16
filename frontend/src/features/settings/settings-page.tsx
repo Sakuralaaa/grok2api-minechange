@@ -67,6 +67,7 @@ export function SettingsPage() {
         <Tabs defaultValue="providers" className="space-y-6">
           <TabsList>
             <TabsTrigger value="providers">{t("settings.groups.providers")}</TabsTrigger>
+            <TabsTrigger value="inspection">{t("settings.groups.inspection")}</TabsTrigger>
             <TabsTrigger value="delivery">{t("settings.groups.delivery")}</TabsTrigger>
             <TabsTrigger value="policies">{t("settings.groups.policies")}</TabsTrigger>
           </TabsList>
@@ -87,6 +88,7 @@ export function SettingsPage() {
           >
             <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <SettingsField controlId="provider-base-url" className="sm:col-span-2" label={t("settings.provider.baseURL")} error={form.formState.errors.providerBuild?.baseURL?.message}><Input id="provider-base-url" {...form.register("providerBuild.baseURL")} /></SettingsField>
+              <SettingsField controlId="provider-using-api" className="sm:col-span-2" label={t("settings.provider.usingAPI")}><Controller control={form.control} name="providerBuild.usingAPI" render={({ field }) => <div className="flex h-8 items-center gap-3"><Switch id="provider-using-api" checked={field.value} onCheckedChange={field.onChange} /><span className="text-xs text-muted-foreground">{field.value ? t("settings.provider.usingAPIEnabled") : t("settings.provider.usingAPIDisabled")}</span></div>} /></SettingsField>
               <SettingsField controlId="provider-client-version" label={t("settings.provider.clientVersion")} badge={t("settings.provider.recommendedVersion", { version: recommendedBuild?.clientVersion ?? "-" })} error={form.formState.errors.providerBuild?.clientVersion?.message}><Input id="provider-client-version" {...form.register("providerBuild.clientVersion")} /></SettingsField>
               <SettingsField controlId="provider-client-identifier" label={t("settings.provider.clientIdentifier")} error={form.formState.errors.providerBuild?.clientIdentifier?.message}><Input id="provider-client-identifier" {...form.register("providerBuild.clientIdentifier")} /></SettingsField>
               <SettingsField controlId="provider-token-auth" label={t("settings.provider.tokenAuth")} error={form.formState.errors.providerBuild?.tokenAuth?.message}><Input id="provider-token-auth" {...form.register("providerBuild.tokenAuth")} /></SettingsField>
@@ -137,6 +139,29 @@ export function SettingsPage() {
               <SettingsField controlId="console-heartbeat" label={t("settings.console.streamHeartbeatInterval")} error={form.formState.errors.providerConsole?.streamHeartbeatInterval?.message}><Input id="console-heartbeat" type="number" min={0} max={300} step={1} {...form.register("providerConsole.streamHeartbeatInterval", { valueAsNumber: true })} /></SettingsField>
               <SettingsField controlId="console-search-tools" label={t("settings.console.enableSearchTools")}><Controller control={form.control} name="providerConsole.enableSearchTools" render={({ field }) => <div className="flex h-8 items-center"><Switch id="console-search-tools" checked={field.value} onCheckedChange={field.onChange} /></div>} /></SettingsField>
             </div>
+          </SettingsSection>
+          </SettingsPane>
+
+          <SettingsPane value="inspection">
+          <SettingsSection title={t("settings.inspection.title")}>
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <SettingsField controlId="inspection-enabled" className="sm:col-span-2" label={t("settings.inspection.enabled")}>
+                <Controller control={form.control} name="buildInspection.enabled" render={({ field }) => <div className="flex h-8 items-center gap-3"><Switch id="inspection-enabled" checked={field.value} onCheckedChange={field.onChange} /><span className="text-xs text-muted-foreground">{field.value ? t("settings.inspection.enabledHint") : t("settings.inspection.disabledHint")}</span></div>} />
+              </SettingsField>
+              <SettingsField controlId="inspection-interval" label={t("settings.inspection.interval")} error={form.formState.errors.buildInspection?.interval?.message}><Controller control={form.control} name="buildInspection.interval" render={({ field }) => <DurationInput id="inspection-interval" value={field.value} onChange={field.onChange} />} /></SettingsField>
+              <SettingsField controlId="inspection-workers" label={t("settings.inspection.workers")} error={form.formState.errors.buildInspection?.workers?.message}><Input id="inspection-workers" type="number" min={1} max={16} {...form.register("buildInspection.workers", { valueAsNumber: true })} /></SettingsField>
+              <SettingsField controlId="inspection-include-disabled" className="sm:col-span-2" label={t("settings.inspection.includeDisabled")}>
+                <Controller control={form.control} name="buildInspection.includeDisabled" render={({ field }) => <div className="flex h-8 items-center"><Switch id="inspection-include-disabled" checked={field.value} onCheckedChange={field.onChange} /></div>} />
+              </SettingsField>
+              <SettingsField controlId="inspection-quota-action" label={t("settings.inspection.quotaAction")}>
+                <Controller control={form.control} name="buildInspection.quotaAction" render={({ field }) => <Select value={field.value} onValueChange={field.onChange}><SelectTrigger id="inspection-quota-action"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cooldown">{t("settings.inspection.actions.cooldown")}</SelectItem><SelectItem value="keep">{t("settings.inspection.actions.keep")}</SelectItem><SelectItem value="disable">{t("settings.inspection.actions.disable")}</SelectItem><SelectItem value="delete">{t("settings.inspection.actions.delete")}</SelectItem></SelectContent></Select>} />
+              </SettingsField>
+              <SettingsField controlId="inspection-quota-cooldown" label={t("settings.inspection.quotaCooldown")} error={form.formState.errors.buildInspection?.quotaCooldown?.message}><Controller control={form.control} name="buildInspection.quotaCooldown" render={({ field }) => <DurationInput id="inspection-quota-cooldown" value={field.value} onChange={field.onChange} />} /></SettingsField>
+              <SettingsField controlId="inspection-forbidden-action" className="sm:col-span-2" label={t("settings.inspection.forbiddenAction")}>
+                <Controller control={form.control} name="buildInspection.forbiddenAction" render={({ field }) => <Select value={field.value} onValueChange={field.onChange}><SelectTrigger id="inspection-forbidden-action"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="refresh_then_delete">{t("settings.inspection.actions.refreshThenDelete")}</SelectItem><SelectItem value="keep">{t("settings.inspection.actions.keep")}</SelectItem><SelectItem value="disable">{t("settings.inspection.actions.disable")}</SelectItem><SelectItem value="delete">{t("settings.inspection.actions.delete")}</SelectItem></SelectContent></Select>} />
+              </SettingsField>
+            </div>
+            <p className="mt-4 max-w-[860px] text-xs leading-5 text-muted-foreground">{t("settings.inspection.scopeHint")}</p>
           </SettingsSection>
           </SettingsPane>
 

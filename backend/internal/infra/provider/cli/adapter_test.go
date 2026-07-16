@@ -23,6 +23,26 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 	return fn(request)
 }
 
+func TestResolveBuildBaseURLFollowsUsingAPI(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{name: "official api enabled", cfg: Config{BaseURL: officialAPIBaseURL, UsingAPI: true}, want: officialAPIBaseURL},
+		{name: "oauth official api disabled", cfg: Config{BaseURL: officialAPIBaseURL, UsingAPI: false}, want: cliChatProxyBaseURL},
+		{name: "custom gateway enabled", cfg: Config{BaseURL: "https://gateway.example.com/v1/", UsingAPI: true}, want: "https://gateway.example.com/v1"},
+		{name: "custom gateway disabled", cfg: Config{BaseURL: "https://gateway.example.com/v1/", UsingAPI: false}, want: "https://gateway.example.com/v1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := resolveBuildBaseURL(test.cfg); got != test.want {
+				t.Fatalf("base URL = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestForwardResponseMatchesGrokBuildHeadersAndPreservesReasoning(t *testing.T) {
 	var captured map[string]any
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -67,7 +87,7 @@ func TestForwardResponseMatchesGrokBuildHeadersAndPreservesReasoning(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: "https://api.x.ai/v1", ClientVersion: "0.2.99", ClientIdentifier: "grok-shell", TokenAuth: "xai-grok-cli", UserAgent: "grok-shell/0.2.99 (linux; x86_64)"}, cipher)
+	adapter := NewAdapter(Config{BaseURL: "https://api.x.ai/v1", UsingAPI: true, ClientVersion: "0.2.99", ClientIdentifier: "grok-shell", TokenAuth: "xai-grok-cli", UserAgent: "grok-shell/0.2.99 (linux; x86_64)"}, cipher)
 	adapter.http.Transport = transport
 	response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
 		Credential: account.Credential{ID: 7, UserID: "user-123", EncryptedAccessToken: encrypted}, Method: http.MethodPost, Path: "/responses",

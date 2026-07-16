@@ -5,6 +5,7 @@ import "time"
 // Config 表示可跨重启持久化并支持热加载的网关运行参数。
 type Config struct {
 	ProviderBuild     ProviderBuildConfig
+	BuildInspection   BuildInspectionConfig
 	ProviderWeb       ProviderWebConfig
 	ProviderConsole   ProviderConsoleConfig
 	Batch             BatchConfig
@@ -47,24 +48,34 @@ type BatchConfig struct {
 
 // ProviderBuildConfig 定义 Grok Build CLI 上游协议标识。
 type ProviderConsoleConfig struct {
-	ResponsesURL              string
-	Cluster                   string
-	TeamID                    string
-	UserAgent                 string
-	EnableSearchTools         bool
-	TimeoutSeconds            int
-	QuotaLimit                int
-	QuotaWindowSeconds        int
-	StreamHeartbeatInterval   float64
+	ResponsesURL            string
+	Cluster                 string
+	TeamID                  string
+	UserAgent               string
+	EnableSearchTools       bool
+	TimeoutSeconds          int
+	QuotaLimit              int
+	QuotaWindowSeconds      int
+	StreamHeartbeatInterval float64
 }
-
 
 type ProviderBuildConfig struct {
 	BaseURL          string
+	UsingAPI         bool
 	ClientVersion    string
 	ClientIdentifier string
 	TokenAuth        string
 	UserAgent        string
+}
+
+type BuildInspectionConfig struct {
+	Enabled         bool
+	Interval        time.Duration
+	Workers         int
+	IncludeDisabled bool
+	QuotaAction     string
+	ForbiddenAction string
+	QuotaCooldown   time.Duration
 }
 
 // RoutingConfig 定义会话粘性、冷却和故障切换边界。

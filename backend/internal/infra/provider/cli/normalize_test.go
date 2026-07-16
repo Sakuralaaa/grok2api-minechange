@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -100,7 +101,7 @@ func TestMarshalCredentialsUsesImportDocument(t *testing.T) {
 	data, err := marshalCredentials([]provider.CredentialSeed{{
 		Name: "primary", Email: "user@example.com", UserID: "user-1", TeamID: "team-1",
 		OIDCClientID: "client-1", AccessToken: "access", RefreshToken: "refresh", ExpiresAt: expiresAt,
-	}})
+	}}, credentialExportOptions{UsingAPI: true, BaseURL: "https://api.x.ai/v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +111,9 @@ func TestMarshalCredentialsUsesImportDocument(t *testing.T) {
 	}
 	if len(values) != 1 || values[0].AccessToken != "access" || values[0].RefreshToken != "refresh" || !values[0].ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("round-trip values = %#v", values)
+	}
+	if !bytes.Contains(data, []byte(`"using_api": true`)) || !bytes.Contains(data, []byte(`"base_url": "https://api.x.ai/v1"`)) {
+		t.Fatalf("export metadata missing: %s", data)
 	}
 }
 
@@ -211,4 +215,3 @@ func TestNormalizeResponsesRequestKeepsToolChoiceWithTools(t *testing.T) {
 		t.Fatalf("tools should remain: %#v", payload["tools"])
 	}
 }
-

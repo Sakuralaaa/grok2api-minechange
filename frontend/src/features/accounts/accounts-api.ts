@@ -103,7 +103,7 @@ export type BuildInspectionResultDTO = {
   email?: string;
   disabled: boolean;
   classification: BuildInspectionClassification;
-  action: "keep" | "enable" | "disable" | "delete";
+  action: "keep" | "enable" | "disable" | "delete" | "cooldown";
   reason: string;
   httpStatus?: number;
   model: string;
@@ -111,6 +111,7 @@ export type BuildInspectionResultDTO = {
   errorMessage?: string;
   durationMs: number;
   inspectedAt: string;
+  cooldownUntil?: string;
   applied?: boolean;
   applyError?: string;
 };
@@ -123,13 +124,16 @@ export type BuildInspectionSnapshotDTO = {
   workers: number;
   includeDisabled: boolean;
   onlyDisabled: boolean;
+  baseURL?: string;
+  resolvedBaseURL?: string;
+  usingAPI: boolean;
   startedAt?: string;
   finishedAt?: string;
   results: BuildInspectionResultDTO[];
   summary: Partial<Record<BuildInspectionClassification, number>>;
 };
 
-export type BuildInspectionApplyResultDTO = { enabled: number; disabled: number; deleted: number; failed: number };
+export type BuildInspectionApplyResultDTO = { enabled: number; disabled: number; deleted: number; cooledDown: number; failed: number };
 
 export function getBuildInspectionStatus(): Promise<BuildInspectionSnapshotDTO> {
   return apiRequest<BuildInspectionSnapshotDTO>("/api/admin/v1/accounts/inspection");
