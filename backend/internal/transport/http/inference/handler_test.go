@@ -122,11 +122,12 @@ func TestGatewayErrorPreservesSanitizedUpstreamClassification(t *testing.T) {
 	anthropicRouter.GET("/", func(c *gin.Context) {
 		writeGatewayAnthropicError(c, &gateway.UpstreamFailure{
 			HTTPStatus: http.StatusTooManyRequests, Code: "upstream_rate_limited", PublicMessage: "上游请求频率受限",
+			RetryAfter: 1500 * time.Millisecond,
 		})
 	})
 	anthropicRecorder := httptest.NewRecorder()
 	anthropicRouter.ServeHTTP(anthropicRecorder, httptest.NewRequest(http.MethodGet, "/", nil))
-	if anthropicRecorder.Code != http.StatusTooManyRequests || !strings.Contains(anthropicRecorder.Body.String(), `"type":"rate_limit_error"`) {
+	if anthropicRecorder.Code != http.StatusTooManyRequests || anthropicRecorder.Header().Get("Retry-After") != "2" || !strings.Contains(anthropicRecorder.Body.String(), `"type":"rate_limit_error"`) {
 		t.Fatalf("Anthropic status=%d body=%s", anthropicRecorder.Code, anthropicRecorder.Body.String())
 	}
 }

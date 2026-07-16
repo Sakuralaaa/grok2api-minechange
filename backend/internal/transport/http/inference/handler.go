@@ -1022,6 +1022,7 @@ func writeGatewayError(c *gin.Context, err error) {
 		message = err.Error()
 	case errors.As(err, &upstreamFailure):
 		status, code, message = upstreamFailure.HTTPStatus, upstreamFailure.Code, upstreamFailure.PublicMessage
+		writeRetryAfterHeader(c, upstreamFailure.RetryAfter)
 	case errors.As(err, &selectionFailure):
 		status, code, message = selectionErrorResponse(c, selectionFailure)
 	case errors.Is(err, gateway.ErrResponseAccountUnavailable), errors.Is(err, gateway.ErrNoAvailableAccount):
@@ -1048,6 +1049,7 @@ func writeGatewayAnthropicError(c *gin.Context, err error) {
 		message = err.Error()
 	case errors.As(err, &upstreamFailure):
 		status, message = upstreamFailure.HTTPStatus, upstreamFailure.PublicMessage
+		writeRetryAfterHeader(c, upstreamFailure.RetryAfter)
 		if status == http.StatusTooManyRequests {
 			errorType = "rate_limit_error"
 		}
@@ -1082,11 +1084,16 @@ func selectionErrorResponse(c *gin.Context, failure *gateway.SelectionUnavailabl
 	case gateway.SelectionUnsupportedModel:
 		code, message = "upstream_model_unavailable", "当前账号池不支持该模型"
 	}
-	if failure.RetryAfter > 0 {
-		seconds := max(int64(1), int64((failure.RetryAfter+time.Second-1)/time.Second))
-		c.Header("Retry-After", strconv.FormatInt(seconds, 10))
-	}
+	writeRetryAfterHeader(c, failure.RetryAfter)
 	return status, code, message
+}
+
+func writeRetryAfterHeader(c *gin.Context, retryAfter time.Duration) {
+	if retryAfter <= 0 {
+		return
+	}
+	seconds := max(int64(1), int64((retryAfter+time.Second-1)/time.Second))
+	c.Header("Retry-After", strconv.FormatInt(seconds, 10))
 }
 
 func writeAnthropicError(c *gin.Context, status int, errorType, message string) {

@@ -201,15 +201,19 @@ func TestCredentialRefreshSchedulerRefreshesOnlyDueAccounts(t *testing.T) {
 	})
 
 	deadline := time.Now().Add(2 * time.Second)
-	for adapter.refreshCount.Load() == 0 && time.Now().Before(deadline) {
+	var updated accountdomain.Credential
+	for time.Now().Before(deadline) {
+		updated, err = service.accounts.Get(ctx, credential.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if adapter.refreshCount.Load() == 1 && updated.EncryptedAccessToken == "access-1" && updated.LastRefreshAt != nil {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if adapter.refreshCount.Load() != 1 {
 		t.Fatalf("refresh count = %d", adapter.refreshCount.Load())
-	}
-	updated, err := service.accounts.Get(ctx, credential.ID)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if updated.RefreshDueAt == nil || !updated.RefreshDueAt.After(time.Now()) || updated.LastRefreshAt == nil || updated.RefreshFailureCount != 0 {
 		t.Fatalf("updated credential = %#v", updated)
@@ -342,8 +346,20 @@ func TestCredentialRefreshFailureDistinguishesTransientAndPermanent(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if permanent.AuthStatus != accountdomain.AuthStatusReauthRequired || permanent.RefreshFailureCount != 2 || permanent.LastRefreshErrorCode != "invalid_grant" {
+	if permanent.AuthStatus != accountdomain.AuthStatusActive || !permanent.RefreshPermanent || permanent.RefreshFailureCount != 2 || permanent.LastRefreshErrorCode != "invalid_grant" || permanent.RefreshDueAt == nil || !permanent.RefreshDueAt.Equal(permanent.ExpiresAt) {
 		t.Fatalf("permanent state = %#v", permanent)
+	}
+
+	service.now = func() time.Time { return permanent.ExpiresAt.Add(time.Second) }
+	if _, err := service.EnsureCredential(ctx, permanent, false); !errors.Is(err, ErrCredentialRefreshPermanent) {
+		t.Fatalf("expired permanent refresh err = %v", err)
+	}
+	expired, err := service.accounts.Get(ctx, credential.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.AuthStatus != accountdomain.AuthStatusReauthRequired || !expired.RefreshPermanent {
+		t.Fatalf("expired permanent state = %#v", expired)
 	}
 }
 
@@ -456,10 +472,10 @@ func (a *credentialRefreshAdapter) Definition() provider.Definition {
 	definition := provider.Definition{
 		Provider: value, ModelNamespace: value.ModelNamespace(), ModelCatalog: provider.ModelCatalogStatic,
 		ModelCapabilities: []modeldomain.Capability{modeldomain.CapabilityResponses},
-		Quota: provider.QuotaBilling,
-		Credential: provider.CredentialSurface{AuthType: accountdomain.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true},
-		Conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, Compact: true, StoredResponses: true},
-		Inference: provider.InferencePolicy{Usage: provider.UsageUpstream},
+		Quota:             provider.QuotaBilling,
+		Credential:        provider.CredentialSurface{AuthType: accountdomain.AuthTypeOAuth, Import: true, Refresh: true, DeviceOAuth: true},
+		Conversation:      provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, Compact: true, StoredResponses: true},
+		Inference:         provider.InferencePolicy{Usage: provider.UsageUpstream},
 	}
 	switch value {
 	case accountdomain.ProviderWeb:
@@ -478,7 +494,6 @@ func (a *credentialRefreshAdapter) Definition() provider.Definition {
 	}
 	return definition
 }
-
 
 func (a *credentialRefreshAdapter) RefreshCredential(ctx context.Context, _ accountdomain.Credential) (provider.RefreshedCredential, error) {
 	if a.delay > 0 {
@@ -585,4 +600,3 @@ func TestBatchRefreshTokensSelectedAccounts(t *testing.T) {
 		t.Fatalf("refresh count = %d", adapter.refreshCount.Load())
 	}
 }
-
