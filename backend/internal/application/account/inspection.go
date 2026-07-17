@@ -309,7 +309,7 @@ func (s *Service) inspectBuildAccount(ctx context.Context, credential accountdom
 	primary := s.callBuildInspection(ctx, adapter, resolved, "/responses", conversation.OperationResponses, primaryBody)
 	if primary.Status == http.StatusTooManyRequests {
 		classified := classifyBuildInspection(primary, result.Disabled)
-		if classified.Classification == "probe_error" {
+		if classified.Classification == "probe_error" || classified.Classification == "rate_limited" {
 			select {
 			case <-ctx.Done():
 			case <-time.After(350 * time.Millisecond):
@@ -387,8 +387,8 @@ func classifyBuildInspection(response buildProbeResponse, disabled bool) buildPr
 	if response.Status == http.StatusPaymentRequired || inspectionContains(blob, "free-usage-exhausted", "used all the included free usage", "included free usage has been exhausted") {
 		return buildProbeClassification{"quota_exhausted", "cooldown", "额度受限，建议进入 24 小时冷却池", code, message}
 	}
-	if response.Status == http.StatusTooManyRequests {
-		return buildProbeClassification{"probe_error", "keep", "临时限流 (HTTP 429)，建议稍后重试", code, message}
+	if response.Status == http.StatusTooManyRequests || strings.TrimSpace(code) == "429" || inspectionContains(blob, "too many requests", "rate limit", "rate_limit") {
+		return buildProbeClassification{"rate_limited", "cooldown", "请求受到限流，建议进入 24 小时冷却池", code, message}
 	}
 	if inspectionContains(blob, "permission-denied", "chat endpoint is denied", "deactivated", "suspended", "banned") {
 		return buildProbeClassification{"permission_denied", actionForDisable, fmt.Sprintf("对话权限被拒绝 (HTTP %d)", response.Status), code, message}
@@ -414,7 +414,7 @@ func classifyBuildInspection(response buildProbeResponse, disabled bool) buildPr
 
 func shouldFallbackBuildInspection(status int, classification string) bool {
 	switch classification {
-	case "reauth", "quota_exhausted", "permission_denied", "healthy":
+	case "reauth", "quota_exhausted", "rate_limited", "permission_denied", "healthy":
 		return false
 	}
 	return status == 0 || status == http.StatusTooManyRequests || status >= 500 || classification == "probe_error" || classification == "unknown" || classification == "model_unavailable"

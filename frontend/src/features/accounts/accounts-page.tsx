@@ -869,7 +869,7 @@ export function AccountsPage() {
             </Table>
           </div>
           <DialogFooter className="shrink-0 items-center sm:justify-between">
-            <span className="text-xs text-muted-foreground">403 凭证失效建议删除；402/额度用尽建议进入 24 小时冷却池，到期自动恢复。临时 429、模型不可用和探测异常会保留。</span>
+            <span className="text-xs text-muted-foreground">403 凭证失效建议删除；402、429 和额度用尽建议进入 24 小时冷却池，到期自动恢复。模型不可用和探测异常会保留。</span>
             <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => setInspectionOpen(false)}>关闭</Button><Button size="sm" disabled={inspectionQuery.data?.running || !inspectionQuery.data?.results.some((item) => item.action !== "keep") || applyInspectionMutation.isPending} onClick={() => applyInspectionMutation.mutate()}>{applyInspectionMutation.isPending ? <Spinner /> : null}执行全部建议</Button></div>
           </DialogFooter>
         </DialogContent>
@@ -937,6 +937,7 @@ const inspectionClassificationLabels: Record<BuildInspectionClassification, stri
   healthy: "健康",
   permission_denied: "权限被拒",
   quota_exhausted: "额度用尽",
+  rate_limited: "请求限流",
   reauth: "需重新登录",
   model_unavailable: "模型不可用",
   probe_error: "探测异常",
@@ -970,7 +971,7 @@ function InspectionResultRow({ item }: { item: BuildInspectionResultDTO }) {
     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
     : item.classification === "reauth" || item.classification === "permission_denied"
       ? "bg-destructive/10 text-destructive"
-      : item.classification === "quota_exhausted"
+      : item.classification === "quota_exhausted" || item.classification === "rate_limited"
         ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
         : "";
   return (

@@ -177,7 +177,7 @@ func (s *Service) runAutomaticBuildInspection(ctx context.Context, cfg BuildInsp
 func (s *Service) inspectAndApplyBuildAccountAutomatically(ctx context.Context, credential accountdomain.Credential, cfg BuildInspectionConfig) automaticBuildInspectionOutcome {
 	result := s.inspectBuildAccount(ctx, credential)
 	outcome := automaticBuildInspectionOutcome{classification: result.Classification, action: "keep"}
-	if result.Classification == "quota_exhausted" {
+	if result.Classification == "quota_exhausted" || result.Classification == "rate_limited" {
 		outcome.action, outcome.err = s.applyAutomaticBuildInspectionAction(ctx, credential, cfg.QuotaAction, cfg.QuotaCooldown)
 		return outcome
 	}
@@ -196,7 +196,7 @@ func (s *Service) inspectAndApplyBuildAccountAutomatically(ctx context.Context, 
 	}
 	rechecked := s.inspectBuildAccount(ctx, refreshed)
 	outcome.classification = rechecked.Classification
-	if rechecked.Classification == "quota_exhausted" {
+	if rechecked.Classification == "quota_exhausted" || rechecked.Classification == "rate_limited" {
 		outcome.action, outcome.err = s.applyAutomaticBuildInspectionAction(ctx, credential, cfg.QuotaAction, cfg.QuotaCooldown)
 		return outcome
 	}

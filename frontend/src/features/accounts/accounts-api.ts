@@ -95,7 +95,7 @@ export type AccountSummaryDTO = {
   issues: { disabled: number; reauthRequired: number };
 };
 
-export type BuildInspectionClassification = "healthy" | "permission_denied" | "quota_exhausted" | "reauth" | "model_unavailable" | "probe_error" | "unknown" | "cancelled";
+export type BuildInspectionClassification = "healthy" | "permission_denied" | "quota_exhausted" | "rate_limited" | "reauth" | "model_unavailable" | "probe_error" | "unknown" | "cancelled";
 
 export type BuildInspectionResultDTO = {
   accountId: string;

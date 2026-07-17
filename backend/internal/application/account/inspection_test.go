@@ -26,7 +26,8 @@ func TestClassifyBuildInspectionStatusPolicy(t *testing.T) {
 		{name: "forbidden credential is dead", response: buildProbeResponse{Status: http.StatusForbidden, Body: []byte(`{"error":"access denied"}`)}, classification: "reauth", action: "delete"},
 		{name: "payment required enters cooldown", response: buildProbeResponse{Status: http.StatusPaymentRequired, Body: []byte(`{"error":"quota exhausted"}`)}, classification: "quota_exhausted", action: "cooldown"},
 		{name: "free usage exhaustion enters cooldown", response: buildProbeResponse{Status: http.StatusTooManyRequests, Body: []byte(`{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage"}`)}, classification: "quota_exhausted", action: "cooldown"},
-		{name: "bare rate limit stays probe error", response: buildProbeResponse{Status: http.StatusTooManyRequests, Body: []byte(`{"error":"too many requests"}`)}, classification: "probe_error", action: "keep"},
+		{name: "bare rate limit enters cooldown", response: buildProbeResponse{Status: http.StatusTooManyRequests, Body: []byte(`{"error":"too many requests"}`)}, classification: "rate_limited", action: "cooldown"},
+		{name: "body error code 429 enters cooldown", response: buildProbeResponse{Status: http.StatusBadRequest, Body: []byte(`{"code":"429","error":"rate limit exceeded"}`)}, classification: "rate_limited", action: "cooldown"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
