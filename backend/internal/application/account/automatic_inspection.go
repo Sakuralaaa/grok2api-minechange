@@ -233,7 +233,7 @@ func (s *Service) applyBuildInspectionCooldown(ctx context.Context, id uint64, w
 	}
 	if wasDisabled {
 		enabled := true
-		if _, err := s.BatchUpdate(ctx, []uint64{id}, UpdateInput{Enabled: &enabled}); err != nil {
+		if _, err := s.BatchUpdate(ctx, []uint64{id}, UpdateInput{Enabled: &enabled, PreserveCooldown: true}); err != nil {
 			return nil, err
 		}
 	}

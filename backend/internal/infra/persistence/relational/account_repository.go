@@ -525,6 +525,11 @@ func (r *AccountRepository) UpdateMany(ctx context.Context, ids []uint64, update
 	if updates.MinimumRemaining != nil {
 		values["minimum_remaining"] = *updates.MinimumRemaining
 	}
+	if updates.ClearCooldown {
+		values["failure_count"] = 0
+		values["cooldown_until"] = nil
+		values["last_error"] = ""
+	}
 	if len(values) == 0 {
 		return 0, nil
 	}

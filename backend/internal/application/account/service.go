@@ -126,6 +126,7 @@ type UpdateInput struct {
 	Priority         *int
 	MaxConcurrent    *int
 	MinimumRemaining *float64
+	PreserveCooldown bool
 }
 
 type DeviceStartResult struct {
@@ -381,7 +382,11 @@ func (s *Service) BatchUpdate(ctx context.Context, ids []uint64, input UpdateInp
 	if input.Name != nil {
 		return 0, invalidInput("批量更新不支持修改账号名称")
 	}
-	updated, err := s.accounts.UpdateMany(ctx, ids, repository.AccountUpdates{Enabled: input.Enabled, Priority: input.Priority, MaxConcurrent: input.MaxConcurrent, MinimumRemaining: input.MinimumRemaining})
+	clearCooldown := input.Enabled != nil && *input.Enabled && !input.PreserveCooldown
+	updated, err := s.accounts.UpdateMany(ctx, ids, repository.AccountUpdates{
+		Enabled: input.Enabled, Priority: input.Priority, MaxConcurrent: input.MaxConcurrent,
+		MinimumRemaining: input.MinimumRemaining, ClearCooldown: clearCooldown,
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -979,6 +984,11 @@ func (s *Service) Update(ctx context.Context, id uint64, input UpdateInput) (Vie
 	}
 	if input.Enabled != nil {
 		value.Enabled = *input.Enabled
+		if *input.Enabled && !input.PreserveCooldown {
+			value.FailureCount = 0
+			value.CooldownUntil = nil
+			value.LastError = ""
+		}
 	}
 	if input.Priority != nil {
 		value.Priority = *input.Priority
