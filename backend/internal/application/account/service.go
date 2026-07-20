@@ -933,7 +933,7 @@ func (s *Service) ExportCredentials(ctx context.Context) (ExportResult, error) {
 }
 
 // ExportProviderCredentials 导出可由对应 Provider 导入接口重新读取的凭据文档。
-// Web / Console 导出为可重新导入的 SSO JSON；Build 导出为 OAuth JSON。
+// Web / Console 导出为每行一个 SSO Token 的纯文本；Build 导出为 OAuth JSON。
 func (s *Service) ExportProviderCredentials(ctx context.Context, providerValue accountdomain.Provider) (ExportResult, error) {
 	if !providerValue.IsValid() {
 		return ExportResult{}, invalidInput("账号来源无效")
@@ -983,11 +983,34 @@ func (s *Service) ExportProviderCredentials(ctx context.Context, providerValue a
 			OIDCClientID: value.OIDCClientID, AccessToken: accessToken, RefreshToken: refreshToken, ExpiresAt: value.ExpiresAt,
 		})
 	}
+	if providerValue == accountdomain.ProviderWeb || providerValue == accountdomain.ProviderConsole {
+		data := marshalSSOTokenLines(seeds)
+		return ExportResult{Data: data, Count: len(seeds)}, nil
+	}
 	data, err := adapter.MarshalCredentials(seeds)
 	if err != nil {
 		return ExportResult{}, err
 	}
 	return ExportResult{Data: data, Count: len(seeds)}, nil
+}
+
+// marshalSSOTokenLines 输出可被快速导入/账号文件导入重新读取的 SSO 纯文本（每行一个 token）。
+func marshalSSOTokenLines(seeds []provider.CredentialSeed) []byte {
+	seen := make(map[string]struct{}, len(seeds))
+	var b strings.Builder
+	for _, seed := range seeds {
+		token := strings.TrimSpace(seed.AccessToken)
+		if token == "" {
+			continue
+		}
+		if _, exists := seen[token]; exists {
+			continue
+		}
+		seen[token] = struct{}{}
+		b.WriteString(token)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String())
 }
 
 func (s *Service) Update(ctx context.Context, id uint64, input UpdateInput) (View, error) {

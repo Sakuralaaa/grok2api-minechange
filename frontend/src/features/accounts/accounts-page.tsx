@@ -923,7 +923,8 @@ function downloadAccountExport(blob: Blob, provider: "grok_build" | "grok_web" |
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `grok2api-${provider}-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+  const extension = provider === "grok_build" ? "json" : "txt";
+  anchor.download = `grok2api-${provider}-accounts-${new Date().toISOString().slice(0, 10)}.${extension}`;
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

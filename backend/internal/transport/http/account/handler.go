@@ -823,13 +823,19 @@ func (h *Handler) exportCredentials(c *gin.Context) {
 		h.writeServiceError(c, "accountExportFailed", err, http.StatusInternalServerError, "导出账号失败")
 		return
 	}
-	filename := "grok2api-" + string(providerValue) + "-accounts-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
+	extension := ".json"
+	contentType := "application/json; charset=utf-8"
+	if providerValue == accountdomain.ProviderWeb || providerValue == accountdomain.ProviderConsole {
+		extension = ".txt"
+		contentType = "text/plain; charset=utf-8"
+	}
+	filename := "grok2api-" + string(providerValue) + "-accounts-" + time.Now().UTC().Format("20060102T150405Z") + extension
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("X-Exported-Accounts", strconv.Itoa(result.Count))
-	c.Data(http.StatusOK, "application/json; charset=utf-8", result.Data)
+	c.Data(http.StatusOK, contentType, result.Data)
 }
 
 func (h *Handler) syncInitial(ctx context.Context, accountIDs ...uint64) accountsyncapp.Result {
