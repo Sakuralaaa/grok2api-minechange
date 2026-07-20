@@ -365,11 +365,11 @@ export function AccountsPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: exportAccounts,
+    mutationFn: () => exportAccounts(provider),
     onSuccess: (blob) => {
-      downloadAccountExport(blob);
+      downloadAccountExport(blob, provider);
       setExportOpen(false);
-      toast.success(t("accounts.exported"));
+      toast.success(provider === "grok_build" ? t("accounts.exported") : t("accounts.exportedSSO"));
     },
     onError: showError,
   });
@@ -642,10 +642,10 @@ export function AccountsPage() {
                     {provider === "grok_build" ? <DropdownMenuItem onClick={() => void startDeviceLogin()}><ExternalLink />{t("accounts.deviceLogin")}</DropdownMenuItem> : null}
                     {provider === "grok_web" || provider === "grok_console" ? <DropdownMenuItem disabled={importMutation.isPending} onClick={() => setQuickImportOpen(true)}><ClipboardPaste />{t("accounts.quickImportSSO")}</DropdownMenuItem> : null}
                     <DropdownMenuItem disabled={importMutation.isPending} onClick={() => fileInputRef.current?.click()}><FileUp />{provider === "grok_web" || provider === "grok_console" ? t("accounts.importWebFile") : t("accounts.importAuth")}</DropdownMenuItem>
-                    {hasAccounts && provider === "grok_build" ? (
+                    {hasAccounts ? (
                       <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setExportOpen(true)}><Download />{t("accounts.exportAuth")}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setExportOpen(true)}><Download />{provider === "grok_build" ? t("accounts.exportAuth") : t("accounts.exportSSO")}</DropdownMenuItem>
                       </>
                     ) : null}
                   </DropdownMenuContent>
@@ -775,8 +775,16 @@ export function AccountsPage() {
 
       <AlertDialog open={exportOpen} onOpenChange={setExportOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>{t("accounts.exportTitle")}</AlertDialogTitle><AlertDialogDescription>{t("accounts.exportDescription")}</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel><AlertDialogAction disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>{t("accounts.exportAuth")}</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{provider === "grok_build" ? t("accounts.exportTitle") : t("accounts.exportSSOTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{provider === "grok_build" ? t("accounts.exportDescription") : t("accounts.exportSSODescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+              {provider === "grok_build" ? t("accounts.exportAuth") : t("accounts.exportSSO")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
@@ -911,11 +919,11 @@ export function AccountsPage() {
   );
 }
 
-function downloadAccountExport(blob: Blob): void {
+function downloadAccountExport(blob: Blob, provider: "grok_build" | "grok_web" | "grok_console" = "grok_build"): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `grok2api-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `grok2api-${provider}-accounts-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

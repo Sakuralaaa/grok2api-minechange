@@ -927,15 +927,27 @@ func (s *Service) convertWebAccountToBuild(ctx context.Context, id uint64) (uint
 	return buildAccount.ID, created, false, nil
 }
 
-// ExportCredentials 导出可由当前导入接口重新读取的 Grok Build OAuth 凭据文档。
+// ExportCredentials 保留 Grok Build 默认导出语义，供旧调用方兼容。
 func (s *Service) ExportCredentials(ctx context.Context) (ExportResult, error) {
-	adapter, ok := s.providers.CredentialCodec(accountdomain.ProviderBuild)
+	return s.ExportProviderCredentials(ctx, accountdomain.ProviderBuild)
+}
+
+// ExportProviderCredentials 导出可由对应 Provider 导入接口重新读取的凭据文档。
+// Web / Console 导出为可重新导入的 SSO JSON；Build 导出为 OAuth JSON。
+func (s *Service) ExportProviderCredentials(ctx context.Context, providerValue accountdomain.Provider) (ExportResult, error) {
+	if !providerValue.IsValid() {
+		return ExportResult{}, invalidInput("账号来源无效")
+	}
+	if s.providers == nil {
+		return ExportResult{}, fmt.Errorf("Provider 注册表未初始化")
+	}
+	adapter, ok := s.providers.CredentialCodec(providerValue)
 	if !ok {
-		return ExportResult{}, fmt.Errorf("CLI Provider 未注册")
+		return ExportResult{}, fmt.Errorf("Provider %s 不支持凭据导出", providerValue)
 	}
 	values, total, err := s.accounts.List(ctx, repository.AccountListQuery{
 		Page:   repository.PageQuery{Limit: maxCredentialExportAccounts + 1},
-		Filter: repository.AccountListFilter{Provider: string(accountdomain.ProviderBuild), Now: s.now()},
+		Filter: repository.AccountListFilter{Provider: string(providerValue), Now: s.now()},
 	})
 	if err != nil {
 		return ExportResult{}, err
@@ -945,21 +957,28 @@ func (s *Service) ExportCredentials(ctx context.Context) (ExportResult, error) {
 	}
 	seeds := make([]provider.CredentialSeed, 0, len(values))
 	for _, value := range values {
-		if value.Provider != accountdomain.ProviderBuild {
+		if value.Provider != providerValue {
 			continue
 		}
-		accessToken, err := s.cipher.Decrypt(value.EncryptedAccessToken)
-		if err != nil {
-			return ExportResult{}, fmt.Errorf("解密账号 %d access token: %w", value.ID, err)
+		accessToken := ""
+		if value.EncryptedAccessToken != "" {
+			accessToken, err = s.cipher.Decrypt(value.EncryptedAccessToken)
+			if err != nil {
+				return ExportResult{}, fmt.Errorf("解密账号 %d access token: %w", value.ID, err)
+			}
 		}
-		refreshToken, err := s.cipher.Decrypt(value.EncryptedRefreshToken)
-		if err != nil {
-			return ExportResult{}, fmt.Errorf("解密账号 %d refresh token: %w", value.ID, err)
+		refreshToken := ""
+		if value.EncryptedRefreshToken != "" {
+			refreshToken, err = s.cipher.Decrypt(value.EncryptedRefreshToken)
+			if err != nil {
+				return ExportResult{}, fmt.Errorf("解密账号 %d refresh token: %w", value.ID, err)
+			}
 		}
 		if accessToken == "" && refreshToken == "" {
-			return ExportResult{}, fmt.Errorf("账号 %d 没有可导出的 OAuth 凭据", value.ID)
+			return ExportResult{}, fmt.Errorf("账号 %d 没有可导出的凭据", value.ID)
 		}
 		seeds = append(seeds, provider.CredentialSeed{
+			Provider: value.Provider, AuthType: value.AuthType, WebTier: value.WebTier,
 			Name: value.Name, Email: value.Email, UserID: value.UserID, TeamID: value.TeamID,
 			OIDCClientID: value.OIDCClientID, AccessToken: accessToken, RefreshToken: refreshToken, ExpiresAt: value.ExpiresAt,
 		})

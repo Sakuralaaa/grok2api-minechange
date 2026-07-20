@@ -354,8 +354,9 @@ export function refreshAccountQuota(id: string): Promise<AccountDTO> {
   return apiRequest<AccountDTO>(`/api/admin/v1/accounts/${id}/refresh-quota`, { method: "POST" });
 }
 
-export function exportAccounts(): Promise<Blob> {
-  return apiDownload("/api/admin/v1/accounts/export");
+export function exportAccounts(provider: "grok_build" | "grok_web" | "grok_console" = "grok_build"): Promise<Blob> {
+  const query = new URLSearchParams({ provider });
+  return apiDownload(`/api/admin/v1/accounts/export?${query.toString()}`);
 }
 
 export function updateAccountsEnabled(ids: string[], enabled: boolean, provider: "grok_build" | "grok_web" | "grok_console"): Promise<{ updated: number }> {

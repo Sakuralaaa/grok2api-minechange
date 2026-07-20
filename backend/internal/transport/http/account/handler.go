@@ -817,12 +817,13 @@ func (h *Handler) refreshWebQuota(c *gin.Context) {
 }
 
 func (h *Handler) exportCredentials(c *gin.Context) {
-	result, err := h.service.ExportCredentials(c.Request.Context())
+	providerValue := accountdomain.Provider(c.DefaultQuery("provider", string(accountdomain.ProviderBuild)))
+	result, err := h.service.ExportProviderCredentials(c.Request.Context(), providerValue)
 	if err != nil {
 		h.writeServiceError(c, "accountExportFailed", err, http.StatusInternalServerError, "导出账号失败")
 		return
 	}
-	filename := "grok2api-accounts-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
+	filename := "grok2api-" + string(providerValue) + "-accounts-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
